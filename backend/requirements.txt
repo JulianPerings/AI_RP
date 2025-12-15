@@ -10,8 +10,8 @@ langchain-openai==0.0.8
 instructor==0.6.8
 
 # Database
-sqlalchemy[asyncio]==2.0.25
-asyncpg==0.29.0
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
 alembic==1.13.1
 
 # Caching & Queue
