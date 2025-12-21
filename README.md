@@ -1,182 +1,123 @@
-# AI RPG - AI-Powered Roleplaying Game
+# AI RPG Application
 
-An immersive AI-driven roleplaying game with LLM-powered game master, dynamic quests, and intelligent NPCs.
+An AI-powered RPG game with PostgreSQL database backend and OpenAI integration.
 
-## 🎮 Features
+## Project Structure
 
-- **AI Game Master** - Dynamic storytelling powered by OpenAI GPT models
-- **Intelligent NPCs** - Characters with unique personalities and dialogue
-- **Dynamic Quests** - AI-generated quests tailored to your character
-- **Persistent World** - Track items, inventory, events, and progress
-- **Real-time Chat** - Interactive conversations with the game world
-- **Character Progression** - Level up, gain experience, and grow stronger
-
-## 🏗️ Architecture
-
-### Backend (FastAPI + Python)
-- Python 3.13 with modern async FastAPI
-- OpenAI GPT integration for AI features
-- PostgreSQL for persistent storage
-- Redis for caching and sessions
-- SQLAlchemy 2.0 async ORM
-- Comprehensive API with automatic docs
-
-### Frontend (Coming Soon)
-- React 18+ with TypeScript
-- Real-time WebSocket communication
-- Beautiful UI with TailwindCSS & shadcn/ui
-- Responsive design for all devices
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Docker & Docker Compose
-- OpenAI API key
-
-### Setup
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd AI_RP
-   ```
-
-2. **Configure environment**
-   ```bash
-   cd backend
-   cp .env.example .env
-   ```
-   
-   Edit `.env` and add your OpenAI API key:
-   ```env
-   OPENAI_API_KEY=your-api-key-here
-   SECRET_KEY=your-secret-key-change-in-production
-   ```
-
-3. **Start the application**
-   ```bash
-   cd ..
-   docker-compose up -d
-   ```
-
-4. **Access the API**
-   - API: http://localhost:8000
-   - Swagger Docs: http://localhost:8000/docs
-   - ReDoc: http://localhost:8000/redoc
-
-## 📚 Documentation
-
-- [Backend Documentation](./backend/README.md)
-- API Documentation: Available at `/docs` when running
-
-## 🛠️ Technology Stack
-
-### Backend
-- **FastAPI** - Modern Python web framework
-- **OpenAI API** - LLM integration
-- **PostgreSQL** - Primary database
-- **Redis** - Caching & sessions
-- **SQLAlchemy** - ORM
-- **Pydantic** - Data validation
-- **Alembic** - Database migrations
-- **Docker** - Containerization
-
-### Planned Frontend
-- **React** - UI framework
-- **TypeScript** - Type safety
-- **Vite** - Build tool
-- **TailwindCSS** - Styling
-- **shadcn/ui** - Component library
-- **React Query** - Server state
-- **Zustand** - Client state
-
-## 🎯 Roadmap
-
-### Phase 1: Backend Foundation ✅
-- [x] FastAPI application structure
-- [x] Database models (Player, Quest, Item, Inventory, Events)
-- [x] LLM integration with OpenAI
-- [x] Core API endpoints
-- [x] Docker setup
-
-### Phase 2: Core Gameplay (In Progress)
-- [ ] Combat system
-- [ ] Item and inventory management
-- [ ] Quest generation and tracking
-- [ ] Event system
-- [ ] Character progression
-
-### Phase 3: Frontend
-- [ ] React application setup
-- [ ] Character creation UI
-- [ ] Chat interface
-- [ ] Inventory and quest UI
-- [ ] Real-time updates via WebSockets
-
-### Phase 4: Advanced Features
-- [ ] Multiplayer interactions
-- [ ] World map and locations
-- [ ] Advanced AI behaviors
-- [ ] Voice integration
-- [ ] Mobile app
-
-## 🧪 Development
-
-### Running Tests
-```bash
-cd backend
-pytest
+```
+app/
+├── backend/          # FastAPI backend
+│   ├── agents/      # LangGraph AI agents
+│   ├── api/         # API routes
+│   ├── models/      # SQLAlchemy models
+│   ├── schemas/     # Pydantic schemas
+│   ├── main.py      # FastAPI app
+│   ├── config.py    # Configuration
+│   └── database.py  # Database connection
+└── frontend/        # (To be implemented)
 ```
 
-### Database Migrations
+## Quick Start with Docker
+
+1. **Set your OpenAI API key in `.env`:**
 ```bash
-cd backend
-alembic revision --autogenerate -m "Description"
-alembic upgrade head
+OPENAI_API_KEY=your_actual_key_here
 ```
 
-### Code Quality
+2. **Start the application:**
 ```bash
-cd backend
-ruff format .
-ruff check .
+docker-compose up --build
 ```
 
-## 📝 API Examples
+3. **Access the API:**
+- API Documentation: http://localhost:8000/docs
+- API Base URL: http://localhost:8000
 
-### Create a Player
+## API Endpoints
+
+### AI Game Master (NEW)
+The Game Master is a LangGraph-powered AI agent that creates immersive narrative experiences.
+
+- `POST /game/start-session` - Start a new game session
+  ```json
+  {"player_id": 1}
+  ```
+- `POST /game/chat` - Send player action to Game Master
+  ```json
+  {"message": "I approach the mysterious stranger", "player_id": 1, "session_id": "..."}
+  ```
+- `GET /game/health` - Check Game Master status
+
+The agent has access to 14 tools to query and modify game state (player stats, inventory, quests, relationships, locations).
+
+### Player Characters
+- `POST /player-characters/` - Create player character
+- `GET /player-characters/` - List all player characters
+- `GET /player-characters/{id}` - Get specific player character
+- `PUT /player-characters/{id}` - Update player character
+- `DELETE /player-characters/{id}` - Delete player character
+
+### NPCs
+- `POST /npcs/` - Create NPC
+- `GET /npcs/` - List all NPCs
+- `GET /npcs/{id}` - Get specific NPC
+- `PUT /npcs/{id}` - Update NPC
+- `DELETE /npcs/{id}` - Delete NPC
+
+### Items
+- `POST /items/` - Create item
+- `GET /items/` - List all items
+- `GET /items/{id}` - Get specific item
+- `PUT /items/{id}` - Update item
+- `DELETE /items/{id}` - Delete item
+
+### Locations
+- `POST /locations/` - Create location
+- `GET /locations/` - List all locations
+- `GET /locations/{id}` - Get specific location
+- `PUT /locations/{id}` - Update location
+- `DELETE /locations/{id}` - Delete location
+
+### Quests
+- `POST /quests/` - Create quest
+- `GET /quests/` - List all quests
+- `GET /quests/{id}` - Get specific quest
+- `PUT /quests/{id}` - Update quest
+- `DELETE /quests/{id}` - Delete quest
+
+## Database Schema
+
+- **player_character**: Player data (name, class, level, health, gold, etc.)
+- **non_player_character**: NPCs (name, type, health, dialogue, location)
+- **item**: Items (name, type, description, value, power, owner/location)
+- **location**: Game locations (name, description, type)
+- **quest**: Quests (title, description, status, rewards, player)
+
+## Development
+
+### Without Docker
+
+1. Create virtual environment:
 ```bash
-curl -X POST "http://localhost:8000/api/players/" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "hero123",
-    "email": "hero@example.com",
-    "password": "securepass123",
-    "character_name": "Aragorn",
-    "character_class": "Warrior"
-  }'
+cd app/backend
+python -m venv venv
+source venv/bin/activate
 ```
 
-### Chat with Game Master
+2. Install dependencies:
 ```bash
-curl -X POST "http://localhost:8000/api/game/1/chat" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "I want to explore the nearby forest"
-  }'
+pip install -r requirements.txt
 ```
 
-## 🤝 Contributing
+3. Set up PostgreSQL and update `.env` in backend folder
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+4. Run the application:
+```bash
+uvicorn main:app --reload
+```
 
-## 📄 License
+## Technologies
 
-MIT License - see LICENSE file for details
-
-## 🙏 Acknowledgments
-
-- OpenAI for GPT models
-- FastAPI community
-- All contributors and testers
+- **Backend**: FastAPI, SQLAlchemy, PostgreSQL
+- **AI Agent**: LangGraph, LangChain, OpenAI API (gpt-5-mini)
+- **Containerization**: Docker, Docker Compose
