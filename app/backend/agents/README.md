@@ -9,8 +9,8 @@
 │                   Game Master Agent                  │
 │  (LangGraph + gpt-5-mini + reasoning_effort=medium) │
 ├─────────────────────────────────────────────────────┤
-│  Tools: 30 database operations                       │
-│  Memory: Database-backed chat history                │
+│  Tools: 32 database operations                       │
+│  Memory: Database-backed + Long-term summaries       │
 │  State: Player context, location, messages           │
 └─────────────────────────────────────────────────────┘
 ```
@@ -18,9 +18,10 @@
 ## Files
 
 - `game_master.py` - **GameMasterAgent** - Main LangGraph agent with narrative generation and reasoning
-- `tools.py` - Database tools the agent can invoke (30 tools)
+- `tools.py` - Database tools the agent can invoke (32 tools)
 - `state.py` - **GameState** TypedDict for agent state management
 - `chat_history_manager.py` - Database-backed conversation persistence
+- `memory_manager.py` - **MemoryManager** - Long-term memory with session summaries and search
 
 ## Game Master Agent
 
@@ -30,7 +31,7 @@ The `GameMasterAgent` is a stateful LangGraph agent that:
 - Manages game state (health, gold, inventory, quests)
 - Creates drama through challenges and moral dilemmas
 
-### Tools Available (30 total)
+### Tools Available (32 total)
 
 **Query Tools:**
 | Tool | Description |
@@ -51,6 +52,12 @@ The `GameMasterAgent` is a stateful LangGraph agent that:
 | `get_player_inventory` | List player's items (returns **instance_id**) |
 | `get_npc_inventory` | List NPC's items (returns **instance_id**) |
 
+**Long-Term Memory Tools:**
+| Tool | Description |
+|------|-------------|
+| `search_memories` | Search past session summaries by keyword |
+| `recall_session_details` | Get full details of a past session |
+
 **Item Transfer (uses instance_id):**
 | Tool | Description |
 |------|-------------|
@@ -58,12 +65,14 @@ The `GameMasterAgent` is a stateful LangGraph agent that:
 | `drop_item` | Player drops item at location |
 | `transfer_item` | Move item between any owners |
 
-**Item Creation (creates NEW items):**
+**Item Creation (creates NEW items with optional buffs/flaws):**
 | Tool | Description |
 |------|-------------|
-| `create_item_for_player` | ⚠️ Spawn new item for player (use for rewards) |
-| `create_item_for_npc` | ⚠️ Spawn new item for NPC (use for setup) |
-| `spawn_item_at_location` | ⚠️ Spawn new item on ground |
+| `create_item_for_player` | ⚠️ Spawn new item for player with unique buffs/flaws |
+| `create_item_for_npc` | ⚠️ Spawn new item for NPC with unique buffs/flaws |
+| `spawn_item_at_location` | ⚠️ Spawn new item on ground with unique buffs/flaws |
+
+All item creation tools now accept optional `buffs` and `flaws` parameters to make items unique.
 
 **Player Management:**
 | Tool | Description |
@@ -140,9 +149,58 @@ response = gm.chat(
 ## API Endpoints
 
 The agent is exposed via `/game` routes:
-- `POST /game/start-session` - Begin new game session with intro narrative
+- `POST /game/start-session` - Begin new game session with intro narrative (now parses backstory to spawn items/NPCs)
 - `POST /game/chat` - Send player action, receive narrative response
 - `GET /game/health` - Check agent status
+- `GET /game/history/{session_id}` - Get chat history for a session
+- `GET /game/sessions/{player_id}` - Get all sessions for a player
+
+### Start Session Enhancement (NEW)
+The `/game/start-session` endpoint now intelligently parses the player's `description` field:
+- **Items mentioned** → Spawned with unique buffs/flaws reflecting their history
+- **NPCs mentioned** → Created and placed at appropriate locations
+- **Relationships** → Established automatically
+
+Example: If player description says "carries his father's sword", the LLM will:
+1. Create the sword with buffs like `["heirloom: +1 morale", "well-balanced"]`
+2. Give it to the player
+3. Mention it in the intro narrative
+
+**Long-Term Memory Endpoints:**
+- `POST /game/memory/summarize/{session_id}` - Generate summary for a session
+- `GET /game/memory/search/{player_id}?query=bob` - Search memories by keyword
+- `GET /game/memory/all/{player_id}` - Get all player memories
+- `GET /game/memory/session/{session_id}` - Get full session details
+
+## Long-Term Memory System
+
+Sessions can be summarized to create searchable long-term memories.
+
+**Flow:**
+```
+1. Player has conversations across multiple sessions
+2. After each session, call POST /game/memory/summarize/{session_id}
+3. LLM generates: title, summary, keywords
+4. Later, when player mentions "remember Bob?"
+5. LLM calls search_memories(player_id, "Bob")
+6. Finds relevant past sessions with Bob
+7. Uses that context in the response
+```
+
+**Example Memory Search:**
+```
+Player: "Let's go visit that blacksmith who helped us"
+
+LLM uses search_memories(player_id=1, query="blacksmith helped")
+→ Returns: [{
+    "session_id": "abc-123",
+    "title": "Meeting Greta the Blacksmith",
+    "summary": "Player met Greta in Ironhaven. She repaired their sword...",
+    "keywords": "greta, blacksmith, ironhaven, sword repair"
+}]
+
+LLM can then use recall_session_details("abc-123") for more context.
+```
 
 ## Configuration
 

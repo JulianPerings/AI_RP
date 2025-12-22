@@ -15,6 +15,7 @@ class PlayerCharacter(Base):
     gold = Column(Integer, default=0)
     description = Column(Text)
     current_location_id = Column(Integer)
+    current_session_id = Column(String(100), nullable=True)  # Active chat session
     race_id = Column(Integer, ForeignKey("race.id"))
     primary_faction_id = Column(Integer, ForeignKey("faction.id"))
     reputation = Column(JSON, default=dict)

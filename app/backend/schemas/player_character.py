@@ -27,6 +27,7 @@ class PlayerCharacterResponse(BaseModel):
     gold: int
     description: Optional[str]
     current_location_id: Optional[int]
+    current_session_id: Optional[str]
     race_id: Optional[int]
     primary_faction_id: Optional[int]
     reputation: Optional[Dict[str, int]]

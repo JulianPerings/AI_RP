@@ -29,6 +29,14 @@ You have access to tools that let you:
 - Create and manage quests
 - Update relationships between characters
 - Move players between locations
+- Search past session memories for long-term continuity
+
+## Item Uniqueness
+When creating items, add minor buffs/flaws to make each instance unique:
+- **Buffs**: Small advantages like "sharp_edge: +2 damage", "lightweight: easier to wield", "heirloom: +1 morale"
+- **Flaws**: Minor drawbacks like "rusty: -1 durability per use", "chipped: less effective", "heavy: harder to carry"
+- Keep descriptions readable and meaningful - the system will interpret them narratively
+- Items from backstories should reflect their history (e.g., father's sword = heirloom buff)
 
 ## Guidelines
 - ALWAYS use tools to check current game state before narrating
@@ -37,6 +45,7 @@ You have access to tools that let you:
 - NPCs should react based on their relationship values and personality
 - Track relationship changes when meaningful interactions occur
 - Create quests organically based on player interactions and world events
+- Mention item buffs/flaws in narrative when relevant (e.g., "your father's well-balanced blade")
 
 ## Combat
 - Describe combat cinematically
@@ -161,11 +170,15 @@ class GameMasterAgent:
         
         logger.info(f"[CHAT] Session {session_id} | Player {player_id} | History: {len(history_messages)} msgs | Message: {message[:100]}...")
         
+        # Track how many messages we started with
+        initial_message_count = len(initial_state["messages"])
+        
         result = self.graph.invoke(initial_state, config)
         
-        # Collect all tool calls made during this interaction
+        # Collect tool calls ONLY from NEW messages (after initial state)
         tool_calls_made = []
-        for msg in result["messages"]:
+        new_messages = result["messages"][initial_message_count:]
+        for msg in new_messages:
             if hasattr(msg, "tool_calls") and msg.tool_calls:
                 for tc in msg.tool_calls:
                     tool_calls_made.append({"tool": tc["name"], "args": tc["args"]})
@@ -183,17 +196,29 @@ class GameMasterAgent:
     def start_session(self, player_id: int, session_id: str) -> tuple[str, List[dict]]:
         """Start a new game session with an introductory message.
         
+        Analyzes the player's description/backstory and spawns relevant items and NPCs.
+        
         Returns:
             Tuple of (response_text, tool_calls_made)
         """
         intro_prompt = f"""A player (ID: {player_id}) is starting a new session. 
-        
-First, use the get_player_info tool to learn about this character, then:
-1. If they have a current location, describe it
-2. If they have active quests, subtly remind them
-3. Set the scene and invite them to begin their adventure
 
-Make it feel like continuing an epic story."""
+First, use get_player_info to learn about this character.
+
+IMPORTANT - Backstory Setup:
+If the player has a description/backstory that mentions:
+- **Items they own**: Use create_item_for_player to give them those items with unique buffs/flaws
+  Example: "carries his father's sword" → create_item_for_player with buffs=["heirloom: +1 morale", "well-balanced"]
+- **NPCs they know**: Use create_npc to spawn those characters at appropriate locations
+  Example: "best friend Marcus" → create_npc for Marcus with appropriate personality
+- **Relationships**: Use update_relationship to establish those connections
+
+After setup:
+1. Describe their current location
+2. Mention any active quests
+3. Set the scene and invite them to begin
+
+Make items feel unique with minor buffs/flaws that reflect their history."""
         
         return self.chat(intro_prompt, player_id, session_id, {"player_name": None})
 

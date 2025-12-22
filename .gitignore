@@ -10,3 +10,4 @@ env/
 *.sqlite3
 .DS_Store
 postgres_data/
+app/frontend/node_modules

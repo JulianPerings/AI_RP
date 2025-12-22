@@ -12,6 +12,10 @@ class ChatSession(Base):
     player_id = Column(Integer, ForeignKey("player_character.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_active = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # Long-term memory fields
+    summary = Column(Text, default=None)  # LLM-generated summary of session
+    keywords = Column(Text, default=None)  # Comma-separated searchable keywords (names, places, events)
+    title = Column(String(200), default=None)  # Short title for the session
 
 
 class ChatMessage(Base):

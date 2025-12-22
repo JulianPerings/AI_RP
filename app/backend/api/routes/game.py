@@ -6,7 +6,7 @@ import uuid
 
 from database import get_db
 from models import PlayerCharacter
-from agents import create_game_master, get_history_manager
+from agents import create_game_master, get_history_manager, get_memory_manager
 
 router = APIRouter(prefix="/game", tags=["game"])
 
@@ -74,14 +74,20 @@ def start_game_session(request: StartSessionRequest, db: Session = Depends(get_d
     """
     Start a new game session for a player.
     
-    Returns an introductory narrative that sets the scene based on
-    the player's current state, location, and active quests.
+    Uses the player's current_session_id if it exists (new character),
+    otherwise creates a new session and updates the player.
     """
     player = db.query(PlayerCharacter).filter(PlayerCharacter.id == request.player_id).first()
     if not player:
         raise HTTPException(status_code=404, detail=f"Player with id {request.player_id} not found")
     
-    session_id = str(uuid.uuid4())
+    # Use existing session if player has one, otherwise create new
+    if player.current_session_id:
+        session_id = player.current_session_id
+    else:
+        session_id = str(uuid.uuid4())
+        player.current_session_id = session_id
+        db.commit()
     
     gm = create_game_master()
     
@@ -165,3 +171,79 @@ def continue_session(request: ChatRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="session_id is required for continue-session")
     
     return game_chat(request, db)
+
+
+# ============= Long-Term Memory Endpoints =============
+
+@router.post("/memory/summarize/{session_id}")
+def summarize_session(session_id: str):
+    """
+    Generate a summary for a session.
+    
+    Call this after a session ends or has enough messages (3+).
+    The summary will be used for long-term memory search.
+    """
+    memory_manager = get_memory_manager()
+    result = memory_manager.generate_session_summary(session_id)
+    
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    
+    return result
+
+
+@router.get("/memory/search/{player_id}")
+def search_player_memories(player_id: int, query: str, db: Session = Depends(get_db)):
+    """
+    Search through a player's session summaries for relevant memories.
+    
+    Use keywords like names, places, events to find relevant past sessions.
+    """
+    player = db.query(PlayerCharacter).filter(PlayerCharacter.id == player_id).first()
+    if not player:
+        raise HTTPException(status_code=404, detail=f"Player with id {player_id} not found")
+    
+    memory_manager = get_memory_manager()
+    results = memory_manager.search_memories(player_id, query)
+    
+    return {
+        "player_id": player_id,
+        "query": query,
+        "results": results
+    }
+
+
+@router.get("/memory/all/{player_id}")
+def get_all_memories(player_id: int, db: Session = Depends(get_db)):
+    """
+    Get all summarized sessions (memories) for a player.
+    """
+    player = db.query(PlayerCharacter).filter(PlayerCharacter.id == player_id).first()
+    if not player:
+        raise HTTPException(status_code=404, detail=f"Player with id {player_id} not found")
+    
+    memory_manager = get_memory_manager()
+    memories = memory_manager.get_all_player_memories(player_id)
+    
+    return {
+        "player_id": player_id,
+        "player_name": player.name,
+        "memory_count": len(memories),
+        "memories": memories
+    }
+
+
+@router.get("/memory/session/{session_id}")
+def get_session_memory(session_id: str, message_limit: int = 20):
+    """
+    Get detailed memory/information about a specific session.
+    
+    Includes the summary plus recent messages from that session.
+    """
+    memory_manager = get_memory_manager()
+    result = memory_manager.get_session_details(session_id, message_limit)
+    
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    
+    return result

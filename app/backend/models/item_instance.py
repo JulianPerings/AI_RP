@@ -23,3 +23,7 @@ class ItemInstance(Base):
     
     custom_name = Column(String(100), nullable=True)
     enchantments = Column(JSON, default=dict)
+    
+    # Item uniqueness: minor buffs and flaws
+    buffs = Column(JSON, default=list)  # e.g., ["sharp_edge: +2 damage", "lightweight: easier to wield"]
+    flaws = Column(JSON, default=list)  # e.g., ["rusty: -1 durability per use", "unbalanced: harder to aim"]

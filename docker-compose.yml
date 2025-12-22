@@ -32,5 +32,17 @@ services:
     volumes:
       - ./app/backend:/app
 
+  frontend:
+    build: ./app/frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    volumes:
+      - ./app/frontend:/app
+      - /app/node_modules
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+
 volumes:
   postgres_data:

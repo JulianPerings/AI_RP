@@ -178,11 +178,21 @@ def get_npc_info(npc_id: int) -> dict:
 
 @tool
 def get_relationship(source_type: str, source_id: int, target_type: str, target_id: int) -> dict:
-    """Get the relationship between two characters. Types are 'PC' or 'NPC'."""
+    """Get the relationship between two characters. Types are 'PC' or 'NPC'.
+    
+    Automatically checks in canonical direction (PC first, or lower ID first).
+    """
     db = SessionLocal()
     try:
         src_type = CharacterType.PC if source_type.upper() == "PC" else CharacterType.NPC
         tgt_type = CharacterType.PC if target_type.upper() == "PC" else CharacterType.NPC
+        
+        # Normalize direction: PC always first, or lower ID first if same type
+        if src_type == CharacterType.NPC and tgt_type == CharacterType.PC:
+            src_type, tgt_type = tgt_type, src_type
+            source_id, target_id = target_id, source_id
+        elif src_type == tgt_type and source_id > target_id:
+            source_id, target_id = target_id, source_id
         
         rel = db.query(CharacterRelationship).filter(
             CharacterRelationship.source_character_type == src_type,
@@ -214,12 +224,25 @@ def get_relationship(source_type: str, source_id: int, target_type: str, target_
 @tool
 def update_relationship(source_type: str, source_id: int, target_type: str, target_id: int, 
                         value_change: int, notes: Optional[str] = None) -> dict:
-    """Update or create a relationship between two characters. value_change is added to current value (-100 to 100 range)."""
+    """Update or create a relationship between two characters. value_change is added to current value (-100 to 100 range).
+    
+    Relationships are stored in a canonical direction (PC always first, or lower ID first for same type).
+    """
     db = SessionLocal()
     try:
         src_type = CharacterType.PC if source_type.upper() == "PC" else CharacterType.NPC
         tgt_type = CharacterType.PC if target_type.upper() == "PC" else CharacterType.NPC
         
+        # Normalize direction: PC always first, or lower ID first if same type
+        if src_type == CharacterType.NPC and tgt_type == CharacterType.PC:
+            # Swap: PC should be source
+            src_type, tgt_type = tgt_type, src_type
+            source_id, target_id = target_id, source_id
+        elif src_type == tgt_type and source_id > target_id:
+            # Swap: lower ID first
+            source_id, target_id = target_id, source_id
+        
+        # Check for existing relationship in canonical direction
         rel = db.query(CharacterRelationship).filter(
             CharacterRelationship.source_character_type == src_type,
             CharacterRelationship.source_character_id == source_id,
@@ -315,11 +338,16 @@ def update_quest_status(quest_id: int, is_active: bool = None, is_completed: boo
 
 
 @tool
-def create_item_for_player(player_id: int, template_id: int, quantity: int = 1, custom_name: Optional[str] = None) -> dict:
+def create_item_for_player(player_id: int, template_id: int, quantity: int = 1, custom_name: Optional[str] = None,
+                          buffs: Optional[List[str]] = None, flaws: Optional[List[str]] = None) -> dict:
     """CREATE a NEW item instance from a template and give it to a player.
     
     WARNING: This creates items out of thin air. Use only for rewards, loot drops, or quest items.
     To transfer an EXISTING item, use transfer_item with the item's instance_id instead.
+    
+    Optional buffs/flaws make items unique:
+    - buffs: ["sharp_edge: +2 damage", "lightweight: easier to wield"]
+    - flaws: ["rusty: -1 durability per use", "chipped: less effective"]
     """
     db = SessionLocal()
     try:
@@ -336,7 +364,9 @@ def create_item_for_player(player_id: int, template_id: int, quantity: int = 1, 
             owner_type=OwnerType.PC,
             owner_id=player_id,
             quantity=quantity,
-            custom_name=custom_name
+            custom_name=custom_name,
+            buffs=buffs or [],
+            flaws=flaws or []
         )
         db.add(item)
         db.commit()
@@ -675,8 +705,14 @@ def create_item_template(name: str, category: str, description: str,
 
 @tool
 def spawn_item_at_location(template_id: int, location_id: int, 
-                           quantity: int = 1, custom_name: Optional[str] = None) -> dict:
-    """Spawn an item on the ground at a location."""
+                           quantity: int = 1, custom_name: Optional[str] = None,
+                           buffs: Optional[List[str]] = None, flaws: Optional[List[str]] = None) -> dict:
+    """Spawn an item on the ground at a location.
+    
+    Optional buffs/flaws make items unique:
+    - buffs: ["sharp_edge: +2 damage", "well-maintained: lasts longer"]
+    - flaws: ["rusty: -1 durability per use", "heavy: harder to carry"]
+    """
     db = SessionLocal()
     try:
         template = db.query(ItemTemplate).filter(ItemTemplate.id == template_id).first()
@@ -693,7 +729,9 @@ def spawn_item_at_location(template_id: int, location_id: int,
             owner_id=None,
             location_id=location_id,
             quantity=quantity,
-            custom_name=custom_name
+            custom_name=custom_name,
+            buffs=buffs or [],
+            flaws=flaws or []
         )
         db.add(item)
         db.commit()
@@ -711,11 +749,16 @@ def spawn_item_at_location(template_id: int, location_id: int,
 
 @tool
 def create_item_for_npc(npc_id: int, template_id: int, 
-                        quantity: int = 1, custom_name: Optional[str] = None) -> dict:
+                        quantity: int = 1, custom_name: Optional[str] = None,
+                        buffs: Optional[List[str]] = None, flaws: Optional[List[str]] = None) -> dict:
     """CREATE a NEW item instance from a template and give it to an NPC.
     
     WARNING: This creates items out of thin air. Use only for NPC inventory setup.
     To transfer an EXISTING item, use transfer_item with the item's instance_id instead.
+    
+    Optional buffs/flaws make items unique:
+    - buffs: ["masterwork: +3 damage", "blessed: effective against undead"]
+    - flaws: ["cursed: drains health", "fragile: breaks easily"]
     """
     db = SessionLocal()
     try:
@@ -732,7 +775,9 @@ def create_item_for_npc(npc_id: int, template_id: int,
             owner_type=OwnerType.NPC,
             owner_id=npc_id,
             quantity=quantity,
-            custom_name=custom_name
+            custom_name=custom_name,
+            buffs=buffs or [],
+            flaws=flaws or []
         )
         db.add(item)
         db.commit()
@@ -873,7 +918,9 @@ def get_items_at_location(location_id: int) -> List[dict]:
                 "template_id": item.template_id,
                 "name": item.custom_name or (template.name if template else "Unknown"),
                 "quantity": item.quantity,
-                "rarity": template.rarity.value if template and template.rarity else None
+                "rarity": template.rarity.value if template and template.rarity else None,
+                "buffs": item.buffs or [],
+                "flaws": item.flaws or []
             })
         return result
     finally:
@@ -902,7 +949,9 @@ def get_player_inventory(player_id: int) -> List[dict]:
                 "name": item.custom_name or (template.name if template else "Unknown"),
                 "quantity": item.quantity,
                 "is_equipped": item.is_equipped,
-                "rarity": template.rarity.value if template and template.rarity else None
+                "rarity": template.rarity.value if template and template.rarity else None,
+                "buffs": item.buffs or [],
+                "flaws": item.flaws or []
             })
         return result
     finally:
@@ -930,7 +979,9 @@ def get_npc_inventory(npc_id: int) -> List[dict]:
                 "template_id": item.template_id,
                 "name": item.custom_name or (template.name if template else "Unknown"),
                 "quantity": item.quantity,
-                "rarity": template.rarity.value if template and template.rarity else None
+                "rarity": template.rarity.value if template and template.rarity else None,
+                "buffs": item.buffs or [],
+                "flaws": item.flaws or []
             })
         return result
     finally:
@@ -1013,6 +1064,42 @@ def drop_item(player_id: int, item_instance_id: int, location_id: int) -> dict:
         db.close()
 
 
+@tool
+def search_memories(player_id: int, query: str) -> List[dict]:
+    """Search through past session memories for relevant information.
+    
+    Use this when the player references something from the past, like:
+    - A person they met before ("remember Bob?")
+    - A place they visited ("that cave we explored")
+    - An event ("when we fought the dragon")
+    - A promise or unfinished business ("the debt I owe")
+    
+    Returns summaries of relevant past sessions with context.
+    """
+    from .memory_manager import get_memory_manager
+    
+    memory_manager = get_memory_manager()
+    results = memory_manager.search_memories(player_id, query, limit=3)
+    
+    if not results:
+        return [{"message": "No relevant memories found for this query"}]
+    
+    return results
+
+
+@tool
+def recall_session_details(session_id: str) -> dict:
+    """Get detailed information about a specific past session.
+    
+    Use this after search_memories finds a relevant session and you need more context.
+    Returns the session summary plus recent messages from that session.
+    """
+    from .memory_manager import get_memory_manager
+    
+    memory_manager = get_memory_manager()
+    return memory_manager.get_session_details(session_id, message_limit=10)
+
+
 def get_game_tools():
     """Return all tools available to the Game Master agent."""
     return [
@@ -1029,6 +1116,9 @@ def get_game_tools():
         get_items_at_location,
         get_player_inventory,
         get_npc_inventory,
+        # Long-term memory (search past sessions)
+        search_memories,
+        recall_session_details,
         # Player management
         update_player_health,
         update_player_gold,
