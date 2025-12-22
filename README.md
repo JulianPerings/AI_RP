@@ -1,20 +1,25 @@
 # AI RPG Application
 
-An AI-powered RPG game with PostgreSQL database backend and OpenAI integration.
+An AI-powered RPG game with React frontend, FastAPI backend, and OpenAI Game Master.
 
 ## Project Structure
 
 ```
 app/
 ├── backend/          # FastAPI backend
-│   ├── agents/      # LangGraph AI agents
+│   ├── agents/      # LangGraph AI agents & tools
 │   ├── api/         # API routes
 │   ├── models/      # SQLAlchemy models
 │   ├── schemas/     # Pydantic schemas
 │   ├── main.py      # FastAPI app
 │   ├── config.py    # Configuration
 │   └── database.py  # Database connection
-└── frontend/        # (To be implemented)
+└── frontend/        # React + Vite UI
+    ├── src/
+    │   ├── views/   # PlayerList, CreatePlayer, Chat
+    │   ├── api/     # API client
+    │   └── App.jsx
+    └── vite.config.js
 ```
 
 ## Quick Start with Docker
@@ -29,26 +34,42 @@ OPENAI_API_KEY=your_actual_key_here
 docker-compose up --build
 ```
 
-3. **Access the API:**
-- API Documentation: http://localhost:8000/docs
-- API Base URL: http://localhost:8000
+3. **Access the application:**
+- **Frontend UI**: http://localhost:5173
+- **API Documentation**: http://localhost:8000/docs
+- **API Base URL**: http://localhost:8000
+
+## Features
+
+### Frontend UI
+- **Player List** - View all characters with stats (health, gold, XP, level)
+- **Create Character** - Form with name, class, race, location, backstory, starting gold/health
+- **Chat Interface** - Real-time conversation with AI Game Master
+  - Loading indicator while GM responds
+  - Tool calls displayed for transparency
+  - Stats refresh after each response
+
+### AI Game Master
+LangGraph-powered agent that creates immersive narratives using 20+ tools:
+- Query/modify player stats, inventory, quests, relationships
+- Create items with unique buffs/flaws
+- Spawn NPCs and manage locations
+- Parse character backstories to auto-create items/NPCs on session start
+- Long-term memory system for continuity across sessions
+
+### Session Management
+- Auto-creates first session on character creation
+- Persistent chat history per session
+- Single session per player (no duplicates)
 
 ## API Endpoints
 
-### AI Game Master (NEW)
-The Game Master is a LangGraph-powered AI agent that creates immersive narrative experiences.
-
-- `POST /game/start-session` - Start a new game session
-  ```json
-  {"player_id": 1}
-  ```
-- `POST /game/chat` - Send player action to Game Master
-  ```json
-  {"message": "I approach the mysterious stranger", "player_id": 1, "session_id": "..."}
-  ```
-- `GET /game/health` - Check Game Master status
-
-The agent has access to 14 tools to query and modify game state (player stats, inventory, quests, relationships, locations).
+### Game Master
+- `POST /game/start-session` - Start session (uses existing session_id if available)
+- `POST /game/chat` - Send player action, receive narrative response
+- `GET /game/history/{session_id}` - Get chat history
+- `POST /game/memory/summarize/{session_id}` - Generate session summary
+- `GET /game/memory/search/{player_id}?query=...` - Search past memories
 
 ### Player Characters
 - `POST /player-characters/` - Create player character
@@ -57,41 +78,25 @@ The agent has access to 14 tools to query and modify game state (player stats, i
 - `PUT /player-characters/{id}` - Update player character
 - `DELETE /player-characters/{id}` - Delete player character
 
-### NPCs
-- `POST /npcs/` - Create NPC
-- `GET /npcs/` - List all NPCs
-- `GET /npcs/{id}` - Get specific NPC
-- `PUT /npcs/{id}` - Update NPC
-- `DELETE /npcs/{id}` - Delete NPC
-
-### Items
-- `POST /items/` - Create item
-- `GET /items/` - List all items
-- `GET /items/{id}` - Get specific item
-- `PUT /items/{id}` - Update item
-- `DELETE /items/{id}` - Delete item
-
-### Locations
-- `POST /locations/` - Create location
-- `GET /locations/` - List all locations
-- `GET /locations/{id}` - Get specific location
-- `PUT /locations/{id}` - Update location
-- `DELETE /locations/{id}` - Delete location
-
-### Quests
-- `POST /quests/` - Create quest
-- `GET /quests/` - List all quests
-- `GET /quests/{id}` - Get specific quest
-- `PUT /quests/{id}` - Update quest
-- `DELETE /quests/{id}` - Delete quest
+### Other Resources
+Standard CRUD endpoints for: NPCs, Items, Locations, Quests, Races, Factions
 
 ## Database Schema
 
-- **player_character**: Player data (name, class, level, health, gold, etc.)
-- **non_player_character**: NPCs (name, type, health, dialogue, location)
-- **item**: Items (name, type, description, value, power, owner/location)
-- **location**: Game locations (name, description, type)
-- **quest**: Quests (title, description, status, rewards, player)
+### Core Models
+- **player_character**: Name, class, level, health, gold, current_session_id
+- **non_player_character**: Name, type, health, behavior_state, personality_traits
+- **item_template**: Item blueprints (name, category, rarity, properties)
+- **item_instance**: Actual items with owner, location, buffs, flaws, enchantments
+- **location**: Name, description, type
+- **quest**: Title, description, status, rewards
+- **chat_session**: Session_id, player_id, summary, keywords (for memory)
+- **chat_message**: Role, content, tool_calls, timestamps
+
+### Relationships
+- **character_relationship**: Unified PC↔NPC, NPC↔NPC relationships with canonical ordering
+- **race_relationship**: Race affinity matrix
+- **faction_relationship**: Faction dynamics
 
 ## Development
 
@@ -118,6 +123,21 @@ uvicorn main:app --reload
 
 ## Technologies
 
+- **Frontend**: React 18, React Router, Vite
 - **Backend**: FastAPI, SQLAlchemy, PostgreSQL
-- **AI Agent**: LangGraph, LangChain, OpenAI API (gpt-5-mini)
+- **AI Agent**: LangGraph, LangChain, OpenAI API (gpt-4o-mini)
 - **Containerization**: Docker, Docker Compose
+
+## Recent Updates
+
+### Bug Fixes
+- Fixed tool calls accumulation (now only shows current turn's calls)
+- Fixed double session creation (player creation + start-session)
+- Fixed React StrictMode double-initialization
+
+### New Features
+- Item uniqueness system with buffs/flaws
+- Backstory parsing to auto-spawn items/NPCs
+- Starting gold and max health in character creation
+- Real-time stats refresh in chat view
+- Long-term memory system for session continuity
