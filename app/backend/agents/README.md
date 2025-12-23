@@ -7,7 +7,7 @@
 ```
 ┌─────────────────────────────────────────────────────┐
 │                   Game Master Agent                  │
-│  (LangGraph + gpt-4o-mini + reasoning_effort=low)   │
+│  (LangGraph + gpt-5-mini + reasoning_effort=low)   │
 ├─────────────────────────────────────────────────────┤
 │  Tools: 32 database operations                       │
 │  Memory: Rolling sessions + Auto-summarization       │
@@ -226,7 +226,7 @@ Settings in `config.py`:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `OPENAI_API_KEY` | - | Required for LLM calls |
-| `OPENAI_MODEL` | gpt-4o-mini | Model to use |
+| `OPENAI_MODEL` | gpt-5-mini | Model to use |
 | `MIN_MESSAGES_IN_SESSION` | 10 | Messages to keep in active session |
 | `MAX_MESSAGES_BEFORE_ARCHIVE` | 20 | Trigger archiving at this count |
 | `SUMMARIES_IN_CONTEXT` | 3 | Previous summaries to include in context |
