@@ -22,8 +22,8 @@ class ItemInstance(Base):
     durability = Column(Integer, default=100)
     
     custom_name = Column(String(100), nullable=True)
-    enchantments = Column(JSON, default=dict)
     
-    # Item uniqueness: minor buffs and flaws
-    buffs = Column(JSON, default=list)  # e.g., ["sharp_edge: +2 damage", "lightweight: easier to wield"]
-    flaws = Column(JSON, default=list)  # e.g., ["rusty: -1 durability per use", "unbalanced: harder to aim"]
+    # Item uniqueness - all stored as string arrays for agent simplicity
+    buffs = Column(JSON, default=list)  # e.g., ["sharp: +2 damage", "lightweight"]
+    flaws = Column(JSON, default=list)  # e.g., ["rusty: -1 durability", "chipped"]
+    enchantments = Column(JSON, default=list)  # e.g., ["fire: +5 fire damage", "glowing: emits light"]

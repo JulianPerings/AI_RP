@@ -178,16 +178,34 @@ function Chat() {
 
   return (
     <div className="chat-container">
-      <Link to="/" className="nav-back">← Back to Characters</Link>
-      
       <div className="chat-header">
-        <div>
-          <h2 style={{ color: 'var(--gold)' }}>{player?.name}</h2>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-            {player?.character_class || 'Adventurer'} • Level {player?.level}
-          </p>
+        <Link to="/" className="nav-back" style={{ margin: 0 }}>← Exit</Link>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <span style={{ color: 'var(--gold)', fontSize: '1.3rem', fontFamily: 'Cinzel, serif', fontWeight: 600 }}>{player?.name}</span>
+          <span style={{ color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
+            {player?.character_class || 'Adventurer'} • Lvl {player?.level}
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginLeft: '0.5rem' }}>
+            <span style={{ fontSize: '0.8rem', color: '#60a5fa' }}>XP</span>
+            <div style={{ 
+              width: '80px', 
+              height: '8px', 
+              background: 'rgba(255,255,255,0.1)', 
+              borderRadius: '4px',
+              overflow: 'hidden'
+            }}>
+              <div style={{ 
+                width: `${player?.experience || 0}%`, 
+                height: '100%', 
+                background: 'linear-gradient(90deg, #60a5fa, #a78bfa)',
+                borderRadius: '4px',
+                transition: 'width 0.3s ease'
+              }} />
+            </div>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{player?.experience || 0}/100</span>
+          </div>
         </div>
-        <div style={{ textAlign: 'right', fontSize: '0.9rem' }}>
+        <div style={{ textAlign: 'right', fontSize: '0.95rem' }}>
           <span className="stat stat-health">❤️ {player?.health}/{player?.max_health}</span>
           <span className="stat stat-gold" style={{ marginLeft: '1rem' }}>💰 {player?.gold}</span>
         </div>

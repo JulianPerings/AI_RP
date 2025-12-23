@@ -7,11 +7,11 @@
 ```
 ┌─────────────────────────────────────────────────────┐
 │                   Game Master Agent                  │
-│  (LangGraph + gpt-5-mini + reasoning_effort=medium) │
+│  (LangGraph + gpt-4o-mini + reasoning_effort=low)   │
 ├─────────────────────────────────────────────────────┤
 │  Tools: 32 database operations                       │
-│  Memory: Database-backed + Long-term summaries       │
-│  State: Player context, location, messages           │
+│  Memory: Rolling sessions + Auto-summarization       │
+│  State: Player context, location, messages, summaries│
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -43,7 +43,7 @@ The `GameMasterAgent` is a stateful LangGraph agent that:
 | `get_relationship` | Query relationship between any two characters |
 | `get_player_quests` | List player's quests |
 | `list_all_locations` | Get all world locations |
-| `list_item_templates` | Get available item types |
+| `list_item_templates` | Search/list item templates by name or category |
 
 **Inventory Query Tools (IMPORTANT):**
 | Tool | Description |
@@ -122,6 +122,16 @@ All item creation tools now accept optional `buffs` and `flaws` parameters to ma
 2. transfer_item(item_instance_id=5, new_owner_type="NPC", new_owner_id=3)
 ```
 
+**Template Search (IMPORTANT):**
+Always search for existing templates before creating new ones:
+```python
+list_item_templates(search="sword")  # Find sword templates
+list_item_templates(category="weapon")  # List all weapons
+```
+
+**Seeded Templates:**
+- Iron Sword, Healing Potion, Bread, Torch, Traveler's Cape
+
 **When to Create Items:**
 - Quest rewards → `create_item_for_player`
 - NPC shop inventory setup → `create_item_for_npc`
@@ -172,49 +182,54 @@ Example: If player description says "carries his father's sword", the LLM will:
 - `GET /game/memory/all/{player_id}` - Get all player memories
 - `GET /game/memory/session/{session_id}` - Get full session details
 
-## Long-Term Memory System
+## Rolling Session Architecture
 
-Sessions can be summarized to create searchable long-term memories.
+The system uses a rolling session model with automatic archiving and summarization.
 
-**Flow:**
+### Session ID Format
 ```
-1. Player has conversations across multiple sessions
-2. After each session, call POST /game/memory/summarize/{session_id}
-3. LLM generates: title, summary, keywords
-4. Later, when player mentions "remember Bob?"
-5. LLM calls search_memories(player_id, "Bob")
-6. Finds relevant past sessions with Bob
-7. Uses that context in the response
+{player_id}-{session_number}
+- {player_id}-0  → Current active session
+- {player_id}-1  → Most recent archive
+- {player_id}-2  → Older archive
+...
 ```
 
-**Example Memory Search:**
+### Automatic Archiving Flow
 ```
-Player: "Let's go visit that blacksmith who helped us"
-
-LLM uses search_memories(player_id=1, query="blacksmith helped")
-→ Returns: [{
-    "session_id": "abc-123",
-    "title": "Meeting Greta the Blacksmith",
-    "summary": "Player met Greta in Ironhaven. She repaired their sword...",
-    "keywords": "greta, blacksmith, ironhaven, sword repair"
-}]
-
-LLM can then use recall_session_details("abc-123") for more context.
+Messages: 1...10  → Keep in active session ({player_id}-0)
+Messages: 11...20 → When MAX_MESSAGES_BEFORE_ARCHIVE reached:
+                    1. Archive oldest 10 messages to {player_id}-1
+                    2. Shift existing archives (1→2, 2→3...)
+                    3. Generate summary for archived session
+                    4. Continue with 10 messages in active session
 ```
+
+### Context Building
+Each LLM call includes:
+1. **System prompt** - Core GM instructions
+2. **Previous summaries** - Last N archived session summaries (configurable)
+3. **Recent messages** - Last 10 messages from active session
+4. **Session context** - Current player, location info
+
+### Archived Session Access
+Archived sessions retain:
+- Full message history (for detailed review)
+- LLM-generated summary
+- Title and keywords (for search)
+
+Access via `get_session_with_messages(session_id)` or memory search tools.
 
 ## Configuration
 
-The agent uses settings from `config.py`:
-- `OPENAI_API_KEY` - Required for LLM calls
-- `OPENAI_MODEL` - Model to use (default: gpt-5-mini)
-
-## Session Memory
-
-LangGraph's `MemorySaver` maintains conversation history per session.
-Each `session_id` preserves:
-- Message history
-- Tool call results
-- Narrative continuity
+Settings in `config.py`:
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `OPENAI_API_KEY` | - | Required for LLM calls |
+| `OPENAI_MODEL` | gpt-4o-mini | Model to use |
+| `MIN_MESSAGES_IN_SESSION` | 10 | Messages to keep in active session |
+| `MAX_MESSAGES_BEFORE_ARCHIVE` | 20 | Trigger archiving at this count |
+| `SUMMARIES_IN_CONTEXT` | 3 | Previous summaries to include in context |
 
 ---
 

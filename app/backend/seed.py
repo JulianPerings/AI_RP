@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from database import SessionLocal, engine
 from models import (
     Location, Race, RaceRelationship, Faction, NonPlayerCharacter,
-    BehaviorState, AlignmentType
+    BehaviorState, AlignmentType, ItemTemplate, ItemCategory, ItemRarity
 )
 
 
@@ -131,6 +131,52 @@ def seed_database():
         )
         db.add(innkeeper)
         print(f"  ✓ Created NPC: {innkeeper.name}")
+        
+        # === ITEM TEMPLATES ===
+        item_templates = [
+            ItemTemplate(
+                name="Iron Sword",
+                category=ItemCategory.WEAPON,
+                description="A sturdy blade forged from iron. Reliable and widely used by soldiers and adventurers alike.",
+                weight=3,
+                rarity=ItemRarity.COMMON,
+                properties={"damage": 5, "type": "melee", "two_handed": False}
+            ),
+            ItemTemplate(
+                name="Healing Potion",
+                category=ItemCategory.POTION,
+                description="A small vial of red liquid that restores health when consumed.",
+                weight=1,
+                rarity=ItemRarity.COMMON,
+                properties={"heal_amount": 25, "consumable": True}
+            ),
+            ItemTemplate(
+                name="Bread",
+                category=ItemCategory.FOOD,
+                description="A fresh loaf of crusty bread. Simple but filling.",
+                weight=1,
+                rarity=ItemRarity.COMMON,
+                properties={"nutrition": 10, "consumable": True}
+            ),
+            ItemTemplate(
+                name="Torch",
+                category=ItemCategory.MISC,
+                description="A wooden stick wrapped in oil-soaked cloth. Provides light in dark places.",
+                weight=1,
+                rarity=ItemRarity.COMMON,
+                properties={"light_radius": 10, "burn_time_minutes": 60}
+            ),
+            ItemTemplate(
+                name="Traveler's Cape",
+                category=ItemCategory.ARMOR,
+                description="A simple woolen cape that provides warmth and protection from the elements.",
+                weight=2,
+                rarity=ItemRarity.COMMON,
+                properties={"defense": 1, "warmth": 5, "slot": "back"}
+            ),
+        ]
+        db.add_all(item_templates)
+        print(f"  ✓ Created {len(item_templates)} item templates")
         
         db.commit()
         print("\n✓ Database seeded successfully!")

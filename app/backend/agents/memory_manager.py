@@ -41,7 +41,7 @@ class MemoryManager:
     
     def __init__(self):
         self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
-        self.summary_model = "gpt-4o-mini"  # Cheaper model for summaries
+        self.summary_model = "gpt-5-mini"  # Cheaper model for summaries
     
     def _get_db(self):
         return SessionLocal()

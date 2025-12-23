@@ -14,55 +14,50 @@ from .chat_history_manager import get_history_manager
 logger = logging.getLogger(__name__)
 
 
-GAME_MASTER_SYSTEM_PROMPT = """You are the Game Master (GM) for an immersive fantasy RPG. Your role is to:
+GAME_MASTER_SYSTEM_PROMPT = """You are the Game Master for an immersive fantasy RPG.
 
-1. **Narrate the World**: Describe scenes, environments, and events with vivid, atmospheric detail.
-2. **Control NPCs**: Give voice to non-player characters based on their personality traits, faction, and relationship with the player.
-3. **Manage Game State**: Use your tools to track and modify player stats, inventory, relationships, and quests.
-4. **Create Drama**: Introduce challenges, moral dilemmas, and meaningful choices.
-5. **Be Fair but Challenging**: The world has consequences. Combat can be deadly. Choices matter.
+## Core Loop
+1. Use tools to query current state (player, location, NPCs, relationships)
+2. Narrate the scene in second person ("You see...")
+3. Use tools to apply consequences (damage, gold, relationship changes)
+4. Create meaningful story events when opportunities arise
+5. Give enemies in fight scenes chances to retaliate
 
-## Your Tools
-You have access to tools that let you:
-- Query player info, locations, NPCs, and relationships
-- Modify player health, gold, and inventory
-- Create and manage quests
-- Update relationships between characters
-- Move players between locations
-- Search past session memories for long-term continuity
+## Tools Available
+- Query: player info, locations, NPCs, items, relationships, memories
+- Modify: health, gold, inventory, quests, relationships, NPC state
+- Create: items (with buffs/flaws), NPCs, quests, locations
 
-## Item Uniqueness
-When creating items, add minor buffs/flaws to make each instance unique:
-- **Buffs**: Small advantages like "sharp_edge: +2 damage", "lightweight: easier to wield", "heirloom: +1 morale"
-- **Flaws**: Minor drawbacks like "rusty: -1 durability per use", "chipped: less effective", "heavy: harder to carry"
-- Keep descriptions readable and meaningful - the system will interpret them narratively
-- Items from backstories should reflect their history (e.g., father's sword = heirloom buff)
+## Items - Templates and Instances
+Templates = generic blueprints (e.g., "Hammer", "Sword", "Potion")
+Instances = specific items with custom_name, buffs, flaws
 
-## Guidelines
-- ALWAYS use tools to check current game state before narrating
-- Keep responses immersive - describe actions and outcomes narratively
-- When the player attempts something risky, use tools to apply consequences
-- NPCs should react based on their relationship values and personality
-- Track relationship changes when meaningful interactions occur
-- Create quests organically based on player interactions and world events
-- Mention item buffs/flaws in narrative when relevant (e.g., "your father's well-balanced blade")
+WORKFLOW to create items:
+1. list_item_templates(search="\{keyword(Name|Type)\}") → find existing template for Name or templates for Type
+2. If none: create template first with generic_name
+3. create the specific item with link to generic template and custom name and unique buffs/flaws
+
+Buff/flaw examples: "sharp: +1 damage", "heirloom: +1 morale", "rusty: -1 durability", "heavy: +1 weight"
+
+## NPCs
+React based on relationship values (-100 to 100) and behavior states:
+passive, defensive, aggressive, hostile, protective
 
 ## Combat
-- Describe combat cinematically
-- Use update_player_health for damage
-- Consider NPC behavior states (passive, defensive, aggressive, hostile, protective)
+- elaborate fight scenes
+- intercept player actions to create opportunities for conflict if they are unreasonable
+- give players oportunities to succeed if they are creative 
 
-## Tone
-Write in second person ("You see...", "You hear..."). Be descriptive but concise.
-Balance serious moments with lighter ones. Make the world feel alive and reactive.
-
-Current session context will be provided with each message."""
+## Style
+- Vivid but concise descriptions
+- Consequences matter - combat can kill
+- Balance drama with lighter moments"""
 
 
 class GameMasterAgent:
     """LangGraph-based Game Master agent for the RPG."""
     
-    def __init__(self, model_name: Optional[str] = None, reasoning_effort: str = "medium"):
+    def __init__(self, model_name: Optional[str] = None, reasoning_effort: str = "low"):
         self.model_name = model_name or settings.OPENAI_MODEL
         self.reasoning_effort = reasoning_effort
         self.tools = get_game_tools()
@@ -70,10 +65,57 @@ class GameMasterAgent:
             model=self.model_name,
             api_key=settings.OPENAI_API_KEY,
             temperature=0.8,
-            model_kwargs={"reasoning_effort": reasoning_effort}
+            reasoning_effort=reasoning_effort
         ).bind_tools(self.tools)
+        # Separate LLM for summarization (no tools needed)
+        self.summary_llm = ChatOpenAI(
+            model=self.model_name,
+            api_key=settings.OPENAI_API_KEY,
+            temperature=0.3
+        )
         self.memory = MemorySaver()
         self.graph = self._build_graph()
+    
+    def _generate_summary(self, messages_text: str) -> tuple[str, str, str]:
+        """Generate a summary, title, and keywords for archived messages.
+        
+        Returns:
+            Tuple of (summary, title, keywords)
+        """
+        prompt = f"""Summarize this RPG session conversation concisely. Extract:
+1. A short title (max 50 chars)
+2. A brief summary (3-5 sentences capturing key events)
+3. Keywords (comma-separated: character names, locations, items, events)
+
+Conversation:
+{messages_text}
+
+Respond in this exact format:
+TITLE: <title>
+SUMMARY: <summary>
+KEYWORDS: <keywords>"""
+        
+        try:
+            response = self.summary_llm.invoke([HumanMessage(content=prompt)])
+            content = response.content
+            
+            # Parse response
+            title = ""
+            summary = ""
+            keywords = ""
+            
+            for line in content.split("\n"):
+                if line.startswith("TITLE:"):
+                    title = line[6:].strip()[:200]
+                elif line.startswith("SUMMARY:"):
+                    summary = line[8:].strip()
+                elif line.startswith("KEYWORDS:"):
+                    keywords = line[9:].strip()
+            
+            return summary or content, title or "Session Archive", keywords
+        except Exception as e:
+            logger.error(f"[SUMMARY] Failed to generate: {e}")
+            return "Session archived", "Session Archive", ""
     
     def _should_continue(self, state: GameState) -> str:
         """Determine if the agent should continue or end."""
@@ -89,6 +131,8 @@ class GameMasterAgent:
         messages = state["messages"]
         
         system_content = GAME_MASTER_SYSTEM_PROMPT
+        
+        # Add session context
         if state.get("session_context"):
             ctx = state["session_context"]
             system_content += f"\n\n## Current Session\n- Player ID: {state.get('player_id')}"
@@ -96,6 +140,17 @@ class GameMasterAgent:
                 system_content += f"\n- Player Name: {ctx['player_name']}"
             if ctx.get("location"):
                 system_content += f"\n- Current Location: {ctx['location']}"
+        
+        # Add previous session summaries for long-term memory
+        if state.get("previous_summaries"):
+            system_content += "\n\n## Previous Session Memories"
+            for summary in state["previous_summaries"]:
+                if summary.get("title"):
+                    system_content += f"\n### {summary['title']}"
+                if summary.get("summary"):
+                    system_content += f"\n{summary['summary']}"
+                if summary.get("keywords"):
+                    system_content += f"\n(Keywords: {summary['keywords']})"
         
         messages_with_system = [SystemMessage(content=system_content)] + list(messages)
         response = self.llm.invoke(messages_with_system)
@@ -157,18 +212,30 @@ class GameMasterAgent:
         # Save incoming human message
         history_manager.save_human_message(session_id, message)
         
+        # Check if we need to archive old messages
+        history_manager.check_and_archive_if_needed(
+            player_id, session_id, 
+            summarize_callback=self._generate_summary
+        )
+        
         # Load recent history for context
-        history_messages = history_manager.get_langchain_messages(session_id, limit=10)
+        history_messages = history_manager.get_langchain_messages(
+            session_id, limit=settings.MIN_MESSAGES_IN_SESSION
+        )
+        
+        # Load previous session summaries for long-term memory
+        previous_summaries = history_manager.get_previous_summaries(player_id)
         
         # Build initial state with history context
         initial_state = {
             "messages": history_messages[:-1] + [HumanMessage(content=message)] if len(history_messages) > 1 else [HumanMessage(content=message)],
             "player_id": player_id,
             "current_location_id": session_context.get("location_id") if session_context else None,
-            "session_context": session_context or {}
+            "session_context": session_context or {},
+            "previous_summaries": previous_summaries
         }
         
-        logger.info(f"[CHAT] Session {session_id} | Player {player_id} | History: {len(history_messages)} msgs | Message: {message[:100]}...")
+        logger.info(f"[CHAT] Session {session_id} | Player {player_id} | History: {len(history_messages)} msgs | Summaries: {len(previous_summaries)} | Message: {message[:100]}...")
         
         # Track how many messages we started with
         initial_message_count = len(initial_state["messages"])
@@ -207,18 +274,17 @@ First, use get_player_info to learn about this character.
 
 IMPORTANT - Backstory Setup:
 If the player has a description/backstory that mentions:
-- **Items they own**: Use create_item_for_player to give them those items with unique buffs/flaws
-  Example: "carries his father's sword" → create_item_for_player with buffs=["heirloom: +1 morale", "well-balanced"]
+- **Items they own**: give them those items with your tool calls
+  Example: "carries his father's sword" → create template for sword if not already created, then create his sword with exemplary buffs/flaws
 - **NPCs they know**: Use create_npc to spawn those characters at appropriate locations
   Example: "best friend Marcus" → create_npc for Marcus with appropriate personality
 - **Relationships**: Use update_relationship to establish those connections
 
 After setup:
 1. Describe their current location
-2. Mention any active quests
-3. Set the scene and invite them to begin
-
-Make items feel unique with minor buffs/flaws that reflect their history."""
+2. Mention any active quests if they have one
+3. Set the scene and wait for their move
+"""
         
         return self.chat(intro_prompt, player_id, session_id, {"player_name": None})
 

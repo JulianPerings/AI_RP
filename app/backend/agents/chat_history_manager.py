@@ -1,13 +1,19 @@
 """
 Database-backed chat history manager for persistent conversation storage.
+
+Session ID format: {player_id}-{session_number}
+- session_number 0 = current active session
+- session_number 1, 2, 3... = archived sessions (higher = older)
 """
 import logging
 from typing import List, Optional
 from sqlalchemy.orm import Session
+from sqlalchemy import func as sql_func
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 from database import SessionLocal
 from models import ChatSession, ChatMessage
+from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -22,18 +28,80 @@ class ChatHistoryManager:
         """Get a database session."""
         return SessionLocal()
     
+    @staticmethod
+    def make_session_id(player_id: int, session_number: int = 0) -> str:
+        """Generate session ID in format: {player_id}-{session_number}"""
+        return f"{player_id}-{session_number}"
+    
+    @staticmethod
+    def parse_session_id(session_id: str) -> tuple[int, int]:
+        """Parse session ID into (player_id, session_number)"""
+        parts = session_id.split("-")
+        return int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
+    
     def get_or_create_session(self, session_id: str, player_id: int) -> ChatSession:
         """Get existing session or create a new one."""
         db = self._get_db()
         try:
             session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
             if not session:
-                session = ChatSession(session_id=session_id, player_id=player_id)
+                _, session_number = self.parse_session_id(session_id)
+                session = ChatSession(
+                    session_id=session_id, 
+                    player_id=player_id,
+                    session_number=session_number
+                )
                 db.add(session)
                 db.commit()
                 db.refresh(session)
-                logger.info(f"[HISTORY] Created new session: {session_id} for player {player_id}")
+                logger.info(f"[HISTORY] Created session: {session_id} (number={session_number}) for player {player_id}")
             return session
+        finally:
+            db.close()
+    
+    def get_active_session(self, player_id: int) -> Optional[ChatSession]:
+        """Get the active session (number=0) for a player."""
+        db = self._get_db()
+        try:
+            return db.query(ChatSession).filter(
+                ChatSession.player_id == player_id,
+                ChatSession.session_number == 0
+            ).first()
+        finally:
+            db.close()
+    
+    def get_message_count(self, session_id: str) -> int:
+        """Get the number of messages in a session."""
+        db = self._get_db()
+        try:
+            return db.query(ChatMessage).filter(ChatMessage.session_id == session_id).count()
+        finally:
+            db.close()
+    
+    def get_previous_summaries(self, player_id: int, limit: int = None) -> List[dict]:
+        """Get summaries from archived sessions for context.
+        
+        Returns summaries ordered from most recent to oldest.
+        """
+        limit = limit or settings.SUMMARIES_IN_CONTEXT
+        db = self._get_db()
+        try:
+            sessions = db.query(ChatSession).filter(
+                ChatSession.player_id == player_id,
+                ChatSession.session_number > 0,  # Only archived sessions
+                ChatSession.summary.isnot(None)
+            ).order_by(ChatSession.session_number.asc()).limit(limit).all()
+            
+            return [
+                {
+                    "session_id": s.session_id,
+                    "session_number": s.session_number,
+                    "title": s.title,
+                    "summary": s.summary,
+                    "keywords": s.keywords
+                }
+                for s in sessions
+            ]
         finally:
             db.close()
     
@@ -131,6 +199,142 @@ class ChatHistoryManager:
             db.query(ChatMessage).filter(ChatMessage.session_id == session_id).delete()
             db.commit()
             logger.info(f"[HISTORY] Cleared session: {session_id}")
+        finally:
+            db.close()
+    
+    def check_and_archive_if_needed(self, player_id: int, session_id: str, 
+                                     summarize_callback=None) -> Optional[str]:
+        """Check if session needs archiving and perform it if so.
+        
+        When message count exceeds MAX_MESSAGES_BEFORE_ARCHIVE:
+        1. Increment all existing session numbers for this player
+        2. Create new archive session (number=1) with oldest messages
+        3. Generate summary for the archived session
+        4. Delete archived messages from active session
+        
+        Args:
+            player_id: The player ID
+            session_id: Current active session ID
+            summarize_callback: Optional async function(messages) -> (summary, title, keywords)
+        
+        Returns:
+            Archive session ID if archiving occurred, None otherwise
+        """
+        msg_count = self.get_message_count(session_id)
+        
+        if msg_count < settings.MAX_MESSAGES_BEFORE_ARCHIVE:
+            return None
+        
+        db = self._get_db()
+        try:
+            # Get oldest messages to archive (keep MIN_MESSAGES_IN_SESSION)
+            messages_to_archive = settings.MAX_MESSAGES_BEFORE_ARCHIVE - settings.MIN_MESSAGES_IN_SESSION
+            
+            oldest_messages = db.query(ChatMessage).filter(
+                ChatMessage.session_id == session_id
+            ).order_by(ChatMessage.created_at.asc()).limit(messages_to_archive).all()
+            
+            if not oldest_messages:
+                return None
+            
+            # Increment all existing archive session numbers
+            existing_archives = db.query(ChatSession).filter(
+                ChatSession.player_id == player_id,
+                ChatSession.session_number > 0
+            ).order_by(ChatSession.session_number.desc()).all()
+            
+            for archive in existing_archives:
+                old_id = archive.session_id
+                new_number = archive.session_number + 1
+                new_id = self.make_session_id(player_id, new_number)
+                
+                # Update session
+                archive.session_id = new_id
+                archive.session_number = new_number
+                
+                # Update all messages in this session
+                db.query(ChatMessage).filter(
+                    ChatMessage.session_id == old_id
+                ).update({"session_id": new_id})
+            
+            # Create new archive session (number=1)
+            archive_session_id = self.make_session_id(player_id, 1)
+            archive_session = ChatSession(
+                session_id=archive_session_id,
+                player_id=player_id,
+                session_number=1
+            )
+            db.add(archive_session)
+            
+            # Move oldest messages to archive
+            message_ids = [m.id for m in oldest_messages]
+            db.query(ChatMessage).filter(
+                ChatMessage.id.in_(message_ids)
+            ).update({"session_id": archive_session_id}, synchronize_session=False)
+            
+            db.commit()
+            
+            logger.info(f"[ARCHIVE] Archived {len(oldest_messages)} messages from {session_id} to {archive_session_id}")
+            
+            # Generate summary if callback provided
+            if summarize_callback:
+                try:
+                    messages_text = "\n".join([
+                        f"{m.role}: {m.content}" for m in oldest_messages
+                    ])
+                    summary, title, keywords = summarize_callback(messages_text)
+                    
+                    # Update archive with summary
+                    db.query(ChatSession).filter(
+                        ChatSession.session_id == archive_session_id
+                    ).update({
+                        "summary": summary,
+                        "title": title,
+                        "keywords": keywords
+                    })
+                    db.commit()
+                    logger.info(f"[ARCHIVE] Generated summary for {archive_session_id}: {title}")
+                except Exception as e:
+                    logger.error(f"[ARCHIVE] Failed to generate summary: {e}")
+            
+            return archive_session_id
+            
+        finally:
+            db.close()
+    
+    def get_session_with_messages(self, session_id: str) -> Optional[dict]:
+        """Get a session with all its messages (for reviewing archived sessions)."""
+        db = self._get_db()
+        try:
+            session = db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+            
+            if not session:
+                return None
+            
+            messages = db.query(ChatMessage).filter(
+                ChatMessage.session_id == session_id
+            ).order_by(ChatMessage.created_at.asc()).all()
+            
+            return {
+                "session_id": session.session_id,
+                "player_id": session.player_id,
+                "session_number": session.session_number,
+                "summary": session.summary,
+                "title": session.title,
+                "keywords": session.keywords,
+                "created_at": session.created_at.isoformat() if session.created_at else None,
+                "messages": [
+                    {
+                        "role": m.role,
+                        "content": m.content,
+                        "tool_calls": m.tool_calls,
+                        "created_at": m.created_at.isoformat() if m.created_at else None
+                    }
+                    for m in messages
+                ]
+            }
         finally:
             db.close()
 

@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
-import uuid
 from database import get_db
 from models.player_character import PlayerCharacter
 from models.chat_history import ChatSession
 from schemas.player_character import PlayerCharacterCreate, PlayerCharacterResponse
+from agents.chat_history_manager import ChatHistoryManager
 
 router = APIRouter(prefix="/player-characters", tags=["player_characters"])
 
@@ -17,11 +17,12 @@ def create_player_character(character: PlayerCharacterCreate, db: Session = Depe
     db.commit()
     db.refresh(db_character)
     
-    # Auto-create first session for this player
-    session_id = str(uuid.uuid4())
+    # Auto-create first session with new ID format: {player_id}-0
+    session_id = ChatHistoryManager.make_session_id(db_character.id, 0)
     chat_session = ChatSession(
         session_id=session_id,
-        player_id=db_character.id
+        player_id=db_character.id,
+        session_number=0
     )
     db.add(chat_session)
     

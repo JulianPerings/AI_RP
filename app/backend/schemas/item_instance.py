@@ -11,7 +11,9 @@ class ItemInstanceCreate(BaseModel):
     quantity: int = 1
     durability: int = 100
     custom_name: Optional[str] = None
-    enchantments: Optional[Dict[str, Any]] = None
+    buffs: Optional[list[str]] = None
+    flaws: Optional[list[str]] = None
+    enchantments: Optional[list[str]] = None
 
 class ItemInstanceResponse(BaseModel):
     id: int
@@ -23,7 +25,9 @@ class ItemInstanceResponse(BaseModel):
     quantity: int
     durability: int
     custom_name: Optional[str]
-    enchantments: Optional[Dict[str, Any]]
+    buffs: Optional[list[str]] = None
+    flaws: Optional[list[str]] = None
+    enchantments: Optional[list[str]] = None
     
     class Config:
         from_attributes = True

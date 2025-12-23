@@ -6,7 +6,7 @@ An AI-powered RPG game with React frontend, FastAPI backend, and OpenAI Game Mas
 
 ```
 app/
-├── backend/          # FastAPI backend
+├── backend/         # FastAPI backend
 │   ├── agents/      # LangGraph AI agents & tools
 │   ├── api/         # API routes
 │   ├── models/      # SQLAlchemy models
@@ -36,8 +36,8 @@ docker-compose up --build
 
 3. **Access the application:**
 - **Frontend UI**: http://localhost:5173
-- **API Documentation**: http://localhost:8000/docs
-- **API Base URL**: http://localhost:8000
+- **SWAGGER API endpoints**: http://localhost:8000/docs
+- **API Base**: http://localhost:8000
 
 ## Features
 
@@ -58,9 +58,8 @@ LangGraph-powered agent that creates immersive narratives using 20+ tools:
 - Long-term memory system for continuity across sessions
 
 ### Session Management
-- Auto-creates first session on character creation
 - Persistent chat history per session
-- Single session per player (no duplicates)
+- Previous session summary
 
 ## API Endpoints
 
@@ -125,7 +124,7 @@ uvicorn main:app --reload
 
 - **Frontend**: React 18, React Router, Vite
 - **Backend**: FastAPI, SQLAlchemy, PostgreSQL
-- **AI Agent**: LangGraph, LangChain, OpenAI API (gpt-4o-mini)
+- **AI Agent**: LangGraph, LangChain, OpenAI API (gpt-5-mini)
 - **Containerization**: Docker, Docker Compose
 
 ## Recent Updates

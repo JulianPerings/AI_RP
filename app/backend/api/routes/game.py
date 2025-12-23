@@ -2,11 +2,11 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.orm import Session
-import uuid
 
 from database import get_db
 from models import PlayerCharacter
 from agents import create_game_master, get_history_manager, get_memory_manager
+from agents.chat_history_manager import ChatHistoryManager
 
 router = APIRouter(prefix="/game", tags=["game"])
 
@@ -75,17 +75,17 @@ def start_game_session(request: StartSessionRequest, db: Session = Depends(get_d
     Start a new game session for a player.
     
     Uses the player's current_session_id if it exists (new character),
-    otherwise creates a new session and updates the player.
+    otherwise creates a new session with format {player_id}-0.
     """
     player = db.query(PlayerCharacter).filter(PlayerCharacter.id == request.player_id).first()
     if not player:
         raise HTTPException(status_code=404, detail=f"Player with id {request.player_id} not found")
     
-    # Use existing session if player has one, otherwise create new
+    # Use existing session if player has one, otherwise create new with {player_id}-0 format
     if player.current_session_id:
         session_id = player.current_session_id
     else:
-        session_id = str(uuid.uuid4())
+        session_id = ChatHistoryManager.make_session_id(request.player_id, 0)
         player.current_session_id = session_id
         db.commit()
     

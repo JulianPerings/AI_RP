@@ -9,3 +9,4 @@ class GameState(TypedDict):
     player_id: int
     current_location_id: Optional[int]
     session_context: dict
+    previous_summaries: Optional[List[dict]]  # Summaries from archived sessions

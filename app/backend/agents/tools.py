@@ -339,15 +339,17 @@ def update_quest_status(quest_id: int, is_active: bool = None, is_completed: boo
 
 @tool
 def create_item_for_player(player_id: int, template_id: int, quantity: int = 1, custom_name: Optional[str] = None,
-                          buffs: Optional[List[str]] = None, flaws: Optional[List[str]] = None) -> dict:
+                          buffs: Optional[List[str]] = None, flaws: Optional[List[str]] = None,
+                          enchantments: Optional[List[str]] = None) -> dict:
     """CREATE a NEW item instance from a template and give it to a player.
     
     WARNING: This creates items out of thin air. Use only for rewards, loot drops, or quest items.
     To transfer an EXISTING item, use transfer_item with the item's instance_id instead.
     
-    Optional buffs/flaws make items unique:
-    - buffs: ["sharp_edge: +2 damage", "lightweight: easier to wield"]
-    - flaws: ["rusty: -1 durability per use", "chipped: less effective"]
+    Make items unique with:
+    - buffs: ["sharp: +2 damage", "lightweight"]
+    - flaws: ["rusty: -1 durability", "chipped"]
+    - enchantments: ["fire: +5 fire damage", "glowing: emits light"]
     """
     db = SessionLocal()
     try:
@@ -366,7 +368,8 @@ def create_item_for_player(player_id: int, template_id: int, quantity: int = 1, 
             quantity=quantity,
             custom_name=custom_name,
             buffs=buffs or [],
-            flaws=flaws or []
+            flaws=flaws or [],
+            enchantments=enchantments or []
         )
         db.add(item)
         db.commit()
@@ -377,7 +380,10 @@ def create_item_for_player(player_id: int, template_id: int, quantity: int = 1, 
             "instance_id": item.id,
             "item_name": custom_name or template.name,
             "quantity": quantity,
-            "to_player": player.name
+            "to_player": player.name,
+            "buffs": item.buffs,
+            "flaws": item.flaws,
+            "enchantments": item.enchantments
         }
     finally:
         db.close()
@@ -469,13 +475,25 @@ def list_all_locations() -> List[dict]:
 
 
 @tool
-def list_item_templates(category: Optional[str] = None) -> List[dict]:
-    """List available item templates, optionally filtered by category."""
+def list_item_templates(category: Optional[str] = None, search: Optional[str] = None) -> List[dict]:
+    """List available item templates, optionally filtered by category or name search.
+    
+    IMPORTANT: Always search for existing templates before creating new ones!
+    Use search parameter to find templates by name (case-insensitive partial match).
+    
+    Args:
+        category: Filter by category (weapon, armor, potion, food, quest, material, misc)
+        search: Search term for template name (e.g., "sword", "potion", "bread")
+    
+    Example: list_item_templates(search="sword") to find sword templates
+    """
     db = SessionLocal()
     try:
         query = db.query(ItemTemplate)
         if category:
             query = query.filter(ItemTemplate.category == category)
+        if search:
+            query = query.filter(ItemTemplate.name.ilike(f"%{search}%"))
         
         templates = query.all()
         return [{
@@ -706,12 +724,14 @@ def create_item_template(name: str, category: str, description: str,
 @tool
 def spawn_item_at_location(template_id: int, location_id: int, 
                            quantity: int = 1, custom_name: Optional[str] = None,
-                           buffs: Optional[List[str]] = None, flaws: Optional[List[str]] = None) -> dict:
+                           buffs: Optional[List[str]] = None, flaws: Optional[List[str]] = None,
+                           enchantments: Optional[List[str]] = None) -> dict:
     """Spawn an item on the ground at a location.
     
-    Optional buffs/flaws make items unique:
-    - buffs: ["sharp_edge: +2 damage", "well-maintained: lasts longer"]
-    - flaws: ["rusty: -1 durability per use", "heavy: harder to carry"]
+    Make items unique with:
+    - buffs: ["sharp: +2 damage", "lightweight"]
+    - flaws: ["rusty: -1 durability", "heavy"]
+    - enchantments: ["fire: +5 fire damage", "glowing"]
     """
     db = SessionLocal()
     try:
@@ -731,7 +751,8 @@ def spawn_item_at_location(template_id: int, location_id: int,
             quantity=quantity,
             custom_name=custom_name,
             buffs=buffs or [],
-            flaws=flaws or []
+            flaws=flaws or [],
+            enchantments=enchantments or []
         )
         db.add(item)
         db.commit()
@@ -741,7 +762,8 @@ def spawn_item_at_location(template_id: int, location_id: int,
             "spawned": True,
             "instance_id": item.id,
             "item_name": custom_name or template.name,
-            "location": location.name
+            "location": location.name,
+            "enchantments": item.enchantments
         }
     finally:
         db.close()
@@ -750,15 +772,17 @@ def spawn_item_at_location(template_id: int, location_id: int,
 @tool
 def create_item_for_npc(npc_id: int, template_id: int, 
                         quantity: int = 1, custom_name: Optional[str] = None,
-                        buffs: Optional[List[str]] = None, flaws: Optional[List[str]] = None) -> dict:
+                        buffs: Optional[List[str]] = None, flaws: Optional[List[str]] = None,
+                        enchantments: Optional[List[str]] = None) -> dict:
     """CREATE a NEW item instance from a template and give it to an NPC.
     
     WARNING: This creates items out of thin air. Use only for NPC inventory setup.
     To transfer an EXISTING item, use transfer_item with the item's instance_id instead.
     
-    Optional buffs/flaws make items unique:
-    - buffs: ["masterwork: +3 damage", "blessed: effective against undead"]
-    - flaws: ["cursed: drains health", "fragile: breaks easily"]
+    Make items unique with:
+    - buffs: ["masterwork: +3 damage", "blessed"]
+    - flaws: ["cursed: drains health", "fragile"]
+    - enchantments: ["frost: +5 cold damage", "vampiric: heals on hit"]
     """
     db = SessionLocal()
     try:
@@ -777,7 +801,8 @@ def create_item_for_npc(npc_id: int, template_id: int,
             quantity=quantity,
             custom_name=custom_name,
             buffs=buffs or [],
-            flaws=flaws or []
+            flaws=flaws or [],
+            enchantments=enchantments or []
         )
         db.add(item)
         db.commit()
@@ -787,7 +812,8 @@ def create_item_for_npc(npc_id: int, template_id: int,
             "given": True,
             "instance_id": item.id,
             "item_name": custom_name or template.name,
-            "to_npc": npc.name
+            "to_npc": npc.name,
+            "enchantments": item.enchantments
         }
     finally:
         db.close()
