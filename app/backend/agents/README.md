@@ -9,7 +9,7 @@
 │                   Game Master Agent                  │
 │  (LangGraph + gpt-5-mini + reasoning_effort=low)   │
 ├─────────────────────────────────────────────────────┤
-│  Tools: 41 database operations                       │
+│  Tools: 44 database operations                       │
 │  Memory: Rolling sessions + Auto-summarization       │
 │  State: Player context, location, messages, summaries│
 └─────────────────────────────────────────────────────┘
@@ -18,7 +18,7 @@
 ## Files
 
 - `game_master.py` - **GameMasterAgent** - Main LangGraph agent with narrative generation and reasoning
-- `tools.py` - Database tools the agent can invoke (41 tools)
+- `tools.py` - Database tools the agent can invoke (44 tools)
 - `state.py` - **GameState** TypedDict for agent state management
 - `chat_history_manager.py` - Database-backed conversation persistence
 - `memory_manager.py` - **MemoryManager** - Long-term memory with session summaries and search
@@ -64,7 +64,7 @@ The GM follows strict narrative rules:
 - **Avoid duplicates** - Check existing locations/NPCs/items before creating new ones
 - **Concise prose** - Aim for paragraphs, not essays
 
-### Tools Available (41 total)
+### Tools Available (44 total)
 
 **Query Tools:**
 | Tool | Description |
@@ -75,7 +75,6 @@ The GM follows strict narrative rules:
 | `get_npcs_at_location` | List all NPCs at a location |
 | `get_relationship` | Query relationship between any two characters |
 | `get_player_quests` | List player's quests |
-| `list_all_locations` | Get all world locations |
 | `list_item_templates` | Search/list item templates by name or category |
 
 **Inventory Query Tools (IMPORTANT):**
@@ -153,6 +152,14 @@ All item creation tools now accept optional `buffs` and `flaws` parameters to ma
 | `create_region` | Create new region with characteristics |
 | `update_region` | Update region properties |
 | `assign_location_to_region` | Link location to a region |
+
+**Race Management:**
+| Tool | Description |
+|------|-------------|
+| `list_races` | List all available races |
+| `get_race_relationships` | Get racial relationship modifiers |
+| `create_race` | Create new race (e.g., Orcs, Goblins) |
+| `update_race_relationship` | Set hostility/alliance between races |
 
 ## Item System - IMPORTANT
 

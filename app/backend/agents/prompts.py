@@ -74,14 +74,19 @@ WORKFLOW: list_item_templates → create_item_template if needed → create_item
 
 ## World Building - AVOID DUPLICATES
 
-**Locations**: Use get_region_info(region_id) to see all locations in the region. Compare names before creating new ones. "Baron's Manor" and "Millhaven Manor" are likely the same place!
+**Locations**: Use get_region_info(region_id) to see all locations in the region. Compare names before creating new ones.
 
 **Items**: list_item_templates(search="sword") → use existing template if found.
 
-**NPCs**: Think critically about existing NPCs:
-- Is this the same person? (Captain Merek vs "a guard captain" = same person)
-- Should they be here now? If NPC escorted player, they traveled too - use move_npc
-- Don't trust player assumptions blindly. If player says "I meet the blacksmith" but no blacksmith exists, create one. If one exists elsewhere, think: would they be here?
+**NPCs**: Think critically - is this the same person? Should they be here now?
+
+**Races**: Use list_races() to see available races. When story involves a new race (orcs, goblins):
+1. Check if race exists with list_races()
+2. If not, create_race() with description
+3. Set race relationships with update_race_relationship() if needed (e.g., orcs hostile to humans)
+4. Assign race_id when creating NPCs of that race
+
+Race relationships affect initial NPC attitudes. A dwarf NPC meeting an elf PC starts with the racial modifier applied.
 
 Only create new entities when nothing suitable exists. Use existing world data!"""
 

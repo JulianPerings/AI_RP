@@ -7,7 +7,8 @@ from models import (
     PlayerCharacter, NonPlayerCharacter, Location, Quest,
     ItemTemplate, ItemInstance, Race, Faction,
     CharacterRelationship, CharacterType, OwnerType,
-    Region, ClimateType, WealthLevel, DangerLevel
+    Region, ClimateType, WealthLevel, DangerLevel,
+    RaceRelationship
 )
 
 
@@ -179,9 +180,10 @@ def get_npc_info(npc_id: int) -> dict:
 
 @tool
 def get_relationship(source_type: str, source_id: int, target_type: str, target_id: int) -> dict:
-    """Get the relationship between two characters. Types are 'PC' or 'NPC'.
+    """Get the personal relationship between two characters (PC↔NPC or NPC↔NPC).
     
-    Automatically checks in canonical direction (PC first, or lower ID first).
+    NOT for racial relationships - use get_race_relationships() for that.
+    Types: 'PC' or 'NPC'
     """
     db = SessionLocal()
     try:
@@ -225,9 +227,10 @@ def get_relationship(source_type: str, source_id: int, target_type: str, target_
 @tool
 def update_relationship(source_type: str, source_id: int, target_type: str, target_id: int, 
                         value_change: int, notes: Optional[str] = None) -> dict:
-    """Update or create a relationship between two characters. value_change is added to current value (-100 to 100 range).
+    """Update personal relationship between two characters (PC↔NPC or NPC↔NPC).
     
-    Relationships are stored in a canonical direction (PC always first, or lower ID first for same type).
+    NOT for racial relationships - use update_race_relationship() for that.
+    value_change is added to current (-100 to +100 range). Types: 'PC' or 'NPC'
     """
     db = SessionLocal()
     try:
@@ -476,22 +479,6 @@ def move_player(player_id: int, location_id: int) -> dict:
 
 
 @tool
-def list_all_locations() -> List[dict]:
-    """Get a list of all locations in the game world."""
-    db = SessionLocal()
-    try:
-        locations = db.query(Location).all()
-        return [{
-            "id": loc.id,
-            "name": loc.name,
-            "description": loc.description,
-            "type": loc.location_type
-        } for loc in locations]
-    finally:
-        db.close()
-
-
-@tool
 def list_item_templates(category: Optional[str] = None, search: Optional[str] = None) -> List[dict]:
     """List available item templates, optionally filtered by category or name search.
     
@@ -634,7 +621,14 @@ def create_npc(name: str, npc_type: str, location_id: int,
                description: Optional[str] = None, dialogue: Optional[str] = None,
                behavior_state: str = "passive", base_disposition: int = 0,
                race_id: Optional[int] = None, faction_id: Optional[int] = None) -> dict:
-    """Create a new NPC in the world."""
+    """Create a new NPC. Use list_races() first to get race_id if needed.
+    
+    Args:
+        npc_type: merchant, guard, innkeeper, noble, commoner, etc.
+        behavior_state: passive, defensive, aggressive, hostile, protective
+        base_disposition: -100 (hostile) to +100 (friendly), default 0 (neutral)
+        race_id: Use list_races() to find. Affects racial relationship modifiers.
+    """
     from models import BehaviorState
     db = SessionLocal()
     try:
@@ -1457,6 +1451,145 @@ def assign_location_to_region(location_id: int, region_id: int) -> dict:
         db.close()
 
 
+# =============================================================================
+# RACE MANAGEMENT TOOLS
+# =============================================================================
+
+@tool
+def list_races() -> list:
+    """List all available races in the world.
+    
+    Use this to see what races exist before creating NPCs or when storytelling
+    involves racial dynamics (e.g., encountering orcs, elves, etc.)
+    """
+    db = SessionLocal()
+    try:
+        races = db.query(Race).all()
+        return [{
+            "id": r.id,
+            "name": r.name,
+            "description": r.description
+        } for r in races]
+    finally:
+        db.close()
+
+
+@tool
+def get_race_relationships(race_id: Optional[int] = None) -> list:
+    """Get racial relationship modifiers between races.
+    
+    Args:
+        race_id: If provided, get relationships for this race only. Otherwise get all.
+    
+    Returns relationships with modifiers (-100 to 100) and reasons.
+    Example: Dwarves and Elves might have -20 modifier due to ancient grudges.
+    """
+    db = SessionLocal()
+    try:
+        query = db.query(RaceRelationship)
+        if race_id:
+            query = query.filter(
+                (RaceRelationship.race_source_id == race_id) | 
+                (RaceRelationship.race_target_id == race_id)
+            )
+        relationships = query.all()
+        
+        results = []
+        for rel in relationships:
+            source = db.query(Race).filter(Race.id == rel.race_source_id).first()
+            target = db.query(Race).filter(Race.id == rel.race_target_id).first()
+            results.append({
+                "source_race": source.name if source else None,
+                "target_race": target.name if target else None,
+                "modifier": rel.base_relationship_modifier,
+                "reason": rel.reason
+            })
+        return results
+    finally:
+        db.close()
+
+
+@tool
+def create_race(name: str, description: str) -> dict:
+    """Create a new race in the world.
+    
+    Use when the story introduces a race that doesn't exist yet (e.g., Orcs, Goblins).
+    Check list_races() first to avoid duplicates!
+    """
+    db = SessionLocal()
+    try:
+        # Check for existing
+        existing = db.query(Race).filter(Race.name.ilike(name)).first()
+        if existing:
+            return {"error": f"Race '{name}' already exists", "existing_id": existing.id}
+        
+        race = Race(name=name, description=description)
+        db.add(race)
+        db.commit()
+        db.refresh(race)
+        
+        return {
+            "created": True,
+            "race_id": race.id,
+            "name": race.name
+        }
+    finally:
+        db.close()
+
+
+@tool
+def update_race_relationship(source_race_id: int, target_race_id: int, 
+                             modifier: int, reason: Optional[str] = None) -> dict:
+    """Set or update the relationship modifier between two races.
+    
+    Args:
+        source_race_id: First race ID
+        target_race_id: Second race ID  
+        modifier: Relationship modifier (-100 hostile to +100 allied)
+        reason: Why this relationship exists (e.g., "Ancient war", "Trade partners")
+    
+    This affects how NPCs of these races initially react to each other.
+    """
+    db = SessionLocal()
+    try:
+        # Validate races exist
+        source = db.query(Race).filter(Race.id == source_race_id).first()
+        target = db.query(Race).filter(Race.id == target_race_id).first()
+        if not source or not target:
+            return {"error": "One or both races not found"}
+        
+        # Find existing or create new
+        rel = db.query(RaceRelationship).filter(
+            RaceRelationship.race_source_id == source_race_id,
+            RaceRelationship.race_target_id == target_race_id
+        ).first()
+        
+        if rel:
+            rel.base_relationship_modifier = modifier
+            if reason:
+                rel.reason = reason
+        else:
+            rel = RaceRelationship(
+                race_source_id=source_race_id,
+                race_target_id=target_race_id,
+                base_relationship_modifier=modifier,
+                reason=reason
+            )
+            db.add(rel)
+        
+        db.commit()
+        
+        return {
+            "updated": True,
+            "source_race": source.name,
+            "target_race": target.name,
+            "modifier": modifier,
+            "reason": reason
+        }
+    finally:
+        db.close()
+
+
 def get_game_tools():
     """Return all tools available to the Game Master agent."""
     return [
@@ -1467,7 +1600,6 @@ def get_game_tools():
         get_npcs_at_location,
         get_relationship,
         get_player_quests,
-        list_all_locations,
         list_item_templates,
         # Inventory query tools (IMPORTANT: use these to get instance_ids)
         get_items_at_location,
@@ -1513,5 +1645,10 @@ def get_game_tools():
         list_regions,
         create_region,
         update_region,
-        assign_location_to_region
+        assign_location_to_region,
+        # Race management
+        list_races,
+        get_race_relationships,
+        create_race,
+        update_race_relationship
     ]
