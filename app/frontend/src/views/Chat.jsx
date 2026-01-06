@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { getPlayer, startSession, sendMessage, getChatHistory, autocompleteAction } from '../api'
+import { getPlayer, startSession, sendMessage, getChatHistory, autocompleteAction, getPlayerInventory, getItemTemplate } from '../api'
 
 const LOADING_MESSAGES = [
   "The Game Master is weaving your tale...",
@@ -26,6 +26,9 @@ function Chat() {
   const [autocompleting, setAutocompleting] = useState(false)
   const [loadingMessage, setLoadingMessage] = useState(LOADING_MESSAGES[0])
   const [error, setError] = useState(null)
+  const [showInventory, setShowInventory] = useState(false)
+  const [inventory, setInventory] = useState([])
+  const [loadingInventory, setLoadingInventory] = useState(false)
   
   const messagesEndRef = useRef(null)
   const loadingIntervalRef = useRef(null)
@@ -130,6 +133,31 @@ function Chat() {
       console.error('Autocomplete failed:', err)
     } finally {
       setAutocompleting(false)
+    }
+  }
+
+  async function handleOpenInventory() {
+    setShowInventory(true)
+    setLoadingInventory(true)
+    try {
+      const items = await getPlayerInventory(parseInt(playerId))
+      // Fetch template info for each item
+      const itemsWithTemplates = await Promise.all(
+        items.map(async (item) => {
+          try {
+            const template = await getItemTemplate(item.template_id)
+            return { ...item, template }
+          } catch {
+            return { ...item, template: null }
+          }
+        })
+      )
+      setInventory(itemsWithTemplates)
+    } catch (err) {
+      console.error('Failed to load inventory:', err)
+      setInventory([])
+    } finally {
+      setLoadingInventory(false)
     }
   }
 
@@ -276,38 +304,95 @@ function Chat() {
         <div ref={messagesEndRef} />
       </div>
 
-      <form onSubmit={handleSend} className="chat-input-area">
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              if (input.trim() && !sending) handleSend(e)
-            }
-          }}
-          placeholder={sending ? "The Game Master is responding..." : "What do you do? (Shift+Enter for new line)"}
-          disabled={sending || autocompleting}
-          autoFocus
-          rows={2}
-        />
+      <div className="chat-bottom-row">
         <button 
           type="button"
-          className="btn btn-secondary"
-          onClick={handleAutocomplete}
-          disabled={sending || autocompleting}
-          title="Generate or polish your action"
+          className="btn btn-inventory"
+          onClick={handleOpenInventory}
+          title="Open Inventory"
         >
-          {autocompleting ? '...' : '✨'}
+          🎒 Inventory
         </button>
-        <button 
-          type="submit" 
-          className="btn btn-primary"
-          disabled={sending || !input.trim()}
-        >
-          {sending ? '...' : 'Send'}
-        </button>
-      </form>
+
+        <form onSubmit={handleSend} className="chat-input-area">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                if (input.trim() && !sending) handleSend(e)
+              }
+            }}
+            placeholder={sending ? "The Game Master is responding..." : "What do you do? (Shift+Enter for new line)"}
+            disabled={sending || autocompleting}
+            autoFocus
+            rows={2}
+          />
+          <button 
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleAutocomplete}
+            disabled={sending || autocompleting}
+            title="Generate or polish your action"
+          >
+            {autocompleting ? '...' : '✨'}
+          </button>
+          <button 
+            type="submit" 
+            className="btn btn-primary"
+            disabled={sending || !input.trim()}
+          >
+            {sending ? '...' : 'Send'}
+          </button>
+        </form>
+      </div>
+
+      {/* Inventory Modal */}
+      {showInventory && (
+        <div className="modal-overlay" onClick={() => setShowInventory(false)}>
+          <div className="modal-content inventory-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>🎒 Inventory</h2>
+              <div className="inventory-legend">
+                <span className="legend-item"><span className="legend-dot equipped"></span> Equipped</span>
+              </div>
+              <button className="modal-close" onClick={() => setShowInventory(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              {loadingInventory ? (
+                <div className="loading-container">
+                  <div className="loading-spinner" />
+                  <p>Loading inventory...</p>
+                </div>
+              ) : inventory.length === 0 ? (
+                <p className="empty-inventory">Your inventory is empty.</p>
+              ) : (
+                <div className="inventory-grid">
+                  {inventory.map((item, idx) => (
+                    <div key={idx} className={`inventory-item ${item.is_equipped ? 'equipped' : ''}`}>
+                      <div className="item-icon">
+                        {item.template?.category === 'weapon' ? '⚔️' :
+                         item.template?.category === 'armor' ? '🛡️' :
+                         item.template?.category === 'consumable' ? '🧪' :
+                         item.template?.category === 'quest' ? '📜' : '📦'}
+                      </div>
+                      <div className="item-details">
+                        <span className="item-name">{item.custom_name || item.template?.name || 'Unknown Item'}</span>
+                        {item.quantity > 1 && <span className="item-quantity">x{item.quantity}</span>}
+                        {item.is_equipped && <span className="item-equipped">EQUIPPED</span>}
+                      </div>
+                      {item.template?.description && (
+                        <p className="item-description">{item.template.description}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

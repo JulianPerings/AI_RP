@@ -120,8 +120,6 @@ def autocomplete_action(
     )
     
     try:
-        # Use config settings for the model
-        # Note: gpt-5-mini uses reasoning tokens, so we need enough for reasoning + output
         llm = ChatOpenAI(
             model=settings.OPENAI_MODEL,
             api_key=settings.OPENAI_API_KEY,

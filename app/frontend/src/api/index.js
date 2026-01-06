@@ -77,3 +77,15 @@ export async function autocompleteAction(playerId, sessionId, userInput = '') {
   if (!res.ok) throw new Error('Failed to autocomplete');
   return res.json();
 }
+
+export async function getPlayerInventory(playerId) {
+  const res = await fetch(`${API_BASE}/item-instances/owner/PC/${playerId}`);
+  if (!res.ok) throw new Error('Failed to fetch inventory');
+  return res.json();
+}
+
+export async function getItemTemplate(templateId) {
+  const res = await fetch(`${API_BASE}/item-templates/${templateId}`);
+  if (!res.ok) throw new Error('Failed to fetch item template');
+  return res.json();
+}
