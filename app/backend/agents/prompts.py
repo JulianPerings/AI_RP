@@ -46,6 +46,7 @@ WORKFLOW: list_item_templates → create_item_template if needed → create_item
 - Elaborate fight scenes with back-and-forth
 - Enemies retaliate - don't let player win without risk
 - Creative solutions deserve creative rewards
+- Use tools to apply damage, gold, relationships, item usage, etc.
 
 ## CRITICAL: Storytelling Rules
 
