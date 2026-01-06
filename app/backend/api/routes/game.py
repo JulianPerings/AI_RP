@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 from database import get_db
 from models import PlayerCharacter
-from agents import create_game_master, get_history_manager, get_memory_manager
+from agents import create_game_master, get_history_manager, get_memory_manager, autocomplete_action
 from agents.chat_history_manager import ChatHistoryManager
 from agents.context_builder import build_session_context
 
@@ -36,6 +36,16 @@ class StartSessionResponse(BaseModel):
     intro: str
     player_name: str
     tool_calls: list = []
+
+
+class AutocompleteRequest(BaseModel):
+    player_id: int
+    session_id: str
+    user_input: str = ""  # Can be empty for suggestion
+
+
+class AutocompleteResponse(BaseModel):
+    suggestion: str
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -111,6 +121,34 @@ def start_game_session(request: StartSessionRequest, db: Session = Depends(get_d
     except Exception as e:
         logger.exception(f"Game Master error in start_session: {e}")
         raise HTTPException(status_code=500, detail=f"Game Master error: {str(e)}")
+
+
+@router.post("/autocomplete", response_model=AutocompleteResponse)
+def handle_autocomplete(request: AutocompleteRequest, db: Session = Depends(get_db)):
+    """
+    Generate or polish a player action based on context.
+    
+    - Empty input: suggests a contextually appropriate action
+    - With input: polishes rough idea into narrative prose
+    """
+    player = db.query(PlayerCharacter).filter(PlayerCharacter.id == request.player_id).first()
+    if not player:
+        raise HTTPException(status_code=404, detail=f"Player with id {request.player_id} not found")
+    
+    # Build rich session context (same as GM gets)
+    session_context = build_session_context(db, request.player_id)
+    
+    try:
+        suggestion = autocomplete_action(
+            player_id=request.player_id,
+            session_id=request.session_id,
+            user_input=request.user_input,
+            session_context=session_context
+        )
+        return AutocompleteResponse(suggestion=suggestion)
+    except Exception as e:
+        logger.exception(f"Autocomplete error: {e}")
+        raise HTTPException(status_code=500, detail=f"Autocomplete error: {str(e)}")
 
 
 @router.get("/health")

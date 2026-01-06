@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { getPlayer, startSession, sendMessage, getChatHistory } from '../api'
+import { getPlayer, startSession, sendMessage, getChatHistory, autocompleteAction } from '../api'
 
 const LOADING_MESSAGES = [
   "The Game Master is weaving your tale...",
@@ -23,6 +23,7 @@ function Chat() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
+  const [autocompleting, setAutocompleting] = useState(false)
   const [loadingMessage, setLoadingMessage] = useState(LOADING_MESSAGES[0])
   const [error, setError] = useState(null)
   
@@ -111,6 +112,27 @@ function Chat() {
     }
   }
 
+  async function handleAutocomplete() {
+    if (sending || autocompleting || !player) return
+    
+    setAutocompleting(true)
+    try {
+      const result = await autocompleteAction(
+        parseInt(playerId),
+        player.current_session_id,
+        input.trim()
+      )
+      console.log('Autocomplete result:', result)
+      if (result && result.suggestion) {
+        setInput(result.suggestion)
+      }
+    } catch (err) {
+      console.error('Autocomplete failed:', err)
+    } finally {
+      setAutocompleting(false)
+    }
+  }
+
   async function handleSend(e) {
     e.preventDefault()
     if (!input.trim() || sending || !player) return
@@ -179,35 +201,46 @@ function Chat() {
   return (
     <div className="chat-container">
       <div className="chat-header">
-        <Link to="/" className="nav-back" style={{ margin: 0 }}>← Exit</Link>
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <span style={{ color: 'var(--gold)', fontSize: '1.3rem', fontFamily: 'Cinzel, serif', fontWeight: 600 }}>{player?.name}</span>
-          <span style={{ color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
-            {player?.character_class || 'Adventurer'} • Lvl {player?.level}
-          </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginLeft: '0.5rem' }}>
-            <span style={{ fontSize: '0.8rem', color: '#60a5fa' }}>XP</span>
+        <div className="chat-header-left">
+          <Link to="/" className="nav-back">← Exit</Link>
+        </div>
+        
+        <div className="chat-header-center">
+          <span className="player-name">{player?.name}</span>
+          <div className="player-info">
+            <span className="class-name">{player?.character_class || 'Adventurer'}</span>
+            <span>•</span>
+            <span>Level {player?.level}</span>
+          </div>
+          <div className="stat-display xp">
+            <span>XP</span>
             <div style={{ 
-              width: '80px', 
-              height: '8px', 
-              background: 'rgba(255,255,255,0.1)', 
-              borderRadius: '4px',
+              width: '60px', 
+              height: '6px', 
+              background: 'rgba(255,255,255,0.15)', 
+              borderRadius: '3px',
               overflow: 'hidden'
             }}>
               <div style={{ 
                 width: `${player?.experience || 0}%`, 
                 height: '100%', 
                 background: 'linear-gradient(90deg, #60a5fa, #a78bfa)',
-                borderRadius: '4px',
-                transition: 'width 0.3s ease'
+                borderRadius: '3px'
               }} />
             </div>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{player?.experience || 0}/100</span>
+            <span style={{ fontSize: '0.8rem' }}>{player?.experience || 0}/100</span>
           </div>
         </div>
-        <div style={{ textAlign: 'right', fontSize: '0.95rem' }}>
-          <span className="stat stat-health">❤️ {player?.health}/{player?.max_health}</span>
-          <span className="stat stat-gold" style={{ marginLeft: '1rem' }}>💰 {player?.gold}</span>
+
+        <div className="chat-header-right">
+          <div className="stat-display health">
+            <span>❤️</span>
+            <span>{player?.health}/{player?.max_health}</span>
+          </div>
+          <div className="stat-display gold">
+            <span>💰</span>
+            <span>{player?.gold}</span>
+          </div>
         </div>
       </div>
 
@@ -244,14 +277,29 @@ function Chat() {
       </div>
 
       <form onSubmit={handleSend} className="chat-input-area">
-        <input
-          type="text"
+        <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={sending ? "The Game Master is responding..." : "What do you do?"}
-          disabled={sending}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              if (input.trim() && !sending) handleSend(e)
+            }
+          }}
+          placeholder={sending ? "The Game Master is responding..." : "What do you do? (Shift+Enter for new line)"}
+          disabled={sending || autocompleting}
           autoFocus
+          rows={2}
         />
+        <button 
+          type="button"
+          className="btn btn-secondary"
+          onClick={handleAutocomplete}
+          disabled={sending || autocompleting}
+          title="Generate or polish your action"
+        >
+          {autocompleting ? '...' : '✨'}
+        </button>
         <button 
           type="submit" 
           className="btn btn-primary"

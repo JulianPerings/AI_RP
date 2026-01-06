@@ -92,6 +92,30 @@ Race relationships affect initial NPC attitudes. A dwarf NPC meeting an elf PC s
 Only create new entities when nothing suitable exists. Use existing world data!"""
 
 
+AUTOCOMPLETE_PROMPT = """You are helping a player write their action in an RPG.
+
+**Player Character:**
+{player_info}
+
+**Current Situation:**
+{context}
+
+**Recent Conversation:**
+{last_gm_message}
+
+**Player's rough idea (may be empty):**
+{user_input}
+
+Generate a first-person action/dialogue that the player might say or do.
+- If input is empty: suggest a contextually appropriate action based on the situation and recent conversation
+- If input has content: polish it into immersive narrative prose
+- Write in first person ("I draw my sword...", "I ask the merchant...")
+- Match the player character's personality if known
+- Consider what NPCs are present and what's happening in the scene
+
+Return ONLY the polished action text, nothing else."""
+
+
 SESSION_START_PROMPT = """A player (ID: {player_id}) is starting a new session. 
 
 First, use get_player_info to learn about this character.

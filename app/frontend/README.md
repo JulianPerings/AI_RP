@@ -20,6 +20,10 @@ React-based frontend for the AI Game Master RPG.
 ### 3. Chat (`/chat/:playerId`)
 - Real-time chat with the AI Game Master
 - Shows tool calls made by the LLM
+- **Autocomplete button (✨)**: 
+  - Empty input → suggests contextual action based on situation
+  - With input → polishes rough idea into narrative prose
+  - Uses player context, location, NPCs for smart suggestions
 - **Loading indicator** while GM responds:
   - Input disabled during response
   - Animated quill + rotating flavor text

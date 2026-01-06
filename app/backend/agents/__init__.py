@@ -3,6 +3,7 @@ from .state import GameState
 from .tools import get_game_tools
 from .chat_history_manager import ChatHistoryManager, get_history_manager
 from .memory_manager import MemoryManager, get_memory_manager
+from .autocomplete import autocomplete_action
 
 __all__ = [
     "GameMasterAgent",
@@ -12,5 +13,6 @@ __all__ = [
     "ChatHistoryManager",
     "get_history_manager",
     "MemoryManager",
-    "get_memory_manager"
+    "get_memory_manager",
+    "autocomplete_action"
 ]

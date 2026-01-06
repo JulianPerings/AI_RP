@@ -63,3 +63,17 @@ export async function getRaces() {
   if (!res.ok) throw new Error('Failed to fetch races');
   return res.json();
 }
+
+export async function autocompleteAction(playerId, sessionId, userInput = '') {
+  const res = await fetch(`${API_BASE}/game/autocomplete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      player_id: playerId,
+      session_id: sessionId,
+      user_input: userInput
+    })
+  });
+  if (!res.ok) throw new Error('Failed to autocomplete');
+  return res.json();
+}

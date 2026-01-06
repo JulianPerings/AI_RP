@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     LLM_REASONING_EFFORT: str = "low"       # Reasoning depth: "low", "medium", "high"
     SUMMARY_LLM_TEMPERATURE: float = 0.3    # Lower temp for consistent summaries
     SUMMARY_LLM_MAX_TOKENS: int = 500       # Summary responses are short
+    AUTOCOMPLETE_MAX_TOKENS: int = 1024     # Tokens for autocomplete (needs room for reasoning)
     
     # Session management
     MIN_MESSAGES_IN_SESSION: int = 15       # Keep at least this many messages in active session

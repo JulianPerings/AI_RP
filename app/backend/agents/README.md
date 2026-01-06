@@ -24,6 +24,7 @@
 - `memory_manager.py` - **MemoryManager** - Long-term memory with session summaries and search
 - `prompts.py` - **Centralized LLM prompts** - All prompts separated from code logic
 - `context_builder.py` - **Session context builder** - Builds rich context with inventory, NPCs, items, quests
+- `autocomplete.py` - **Autocomplete handler** - Context-aware action suggestions for player input
 
 ## Prompts Module
 
@@ -35,6 +36,7 @@ All LLM prompts are centralized in `prompts.py` for easy management:
 | `SESSION_START_PROMPT` | Backstory parsing and session initialization |
 | `ARCHIVE_SUMMARY_PROMPT` | Summarizing messages for rolling archives |
 | `MEMORY_SUMMARY_PROMPT` | Detailed session summaries for long-term memory |
+| `AUTOCOMPLETE_PROMPT` | Polish player input into narrative prose |
 
 **Helper functions:**
 - `format_session_start(player_id)` - Format session start with player ID
