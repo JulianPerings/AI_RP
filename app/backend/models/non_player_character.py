@@ -25,3 +25,5 @@ class NonPlayerCharacter(Base):
     race_id = Column(Integer, ForeignKey("race.id"))
     faction_id = Column(Integer, ForeignKey("faction.id"))
     personality_traits = Column(JSON, default=dict)
+    # Companion system: if set, this NPC follows the player and moves with them
+    following_player_id = Column(Integer, ForeignKey("player_character.id"), nullable=True)

@@ -2,6 +2,7 @@ from .player_character import PlayerCharacterCreate, PlayerCharacterResponse
 from .non_player_character import NonPlayerCharacterCreate, NonPlayerCharacterResponse
 from .item_template import ItemTemplateCreate, ItemTemplateResponse
 from .item_instance import ItemInstanceCreate, ItemInstanceResponse
+from .region import RegionCreate, RegionUpdate, RegionResponse
 from .location import LocationCreate, LocationResponse
 from .quest import QuestCreate, QuestResponse
 from .race import RaceCreate, RaceResponse
@@ -19,6 +20,9 @@ __all__ = [
     "ItemTemplateResponse",
     "ItemInstanceCreate",
     "ItemInstanceResponse",
+    "RegionCreate",
+    "RegionUpdate",
+    "RegionResponse",
     "LocationCreate",
     "LocationResponse",
     "QuestCreate",

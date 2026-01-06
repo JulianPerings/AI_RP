@@ -6,7 +6,8 @@ from database import SessionLocal
 from models import (
     PlayerCharacter, NonPlayerCharacter, Location, Quest,
     ItemTemplate, ItemInstance, Race, Faction,
-    CharacterRelationship, CharacterType, OwnerType
+    CharacterRelationship, CharacterType, OwnerType,
+    Region, ClimateType, WealthLevel, DangerLevel
 )
 
 
@@ -433,7 +434,7 @@ def update_player_health(player_id: int, health_change: int) -> dict:
 
 @tool
 def move_player(player_id: int, location_id: int) -> dict:
-    """Move a player to a new location."""
+    """Move a player to a new location. Companions following the player will automatically move with them."""
     db = SessionLocal()
     try:
         player = db.query(PlayerCharacter).filter(PlayerCharacter.id == player_id).first()
@@ -446,14 +447,30 @@ def move_player(player_id: int, location_id: int) -> dict:
         
         old_location_id = player.current_location_id
         player.current_location_id = location_id
+        
+        # Auto-move companions who are following this player
+        companions = db.query(NonPlayerCharacter).filter(
+            NonPlayerCharacter.following_player_id == player_id
+        ).all()
+        
+        companions_moved = []
+        for companion in companions:
+            companion.location_id = location_id
+            companions_moved.append(companion.name)
+        
         db.commit()
         
-        return {
+        result = {
             "moved": True,
             "player": player.name,
             "from_location_id": old_location_id,
             "to_location": {"id": location.id, "name": location.name, "description": location.description}
         }
+        
+        if companions_moved:
+            result["companions_moved"] = companions_moved
+        
+        return result
     finally:
         db.close()
 
@@ -658,14 +675,55 @@ def create_npc(name: str, npc_type: str, location_id: int,
 
 
 @tool
-def create_location(name: str, description: str, location_type: Optional[str] = None) -> dict:
-    """Create a new location in the world."""
+def list_locations(search: Optional[str] = None, region_id: Optional[int] = None) -> list:
+    """List all locations, optionally filtered by search term or region. 
+    ALWAYS check this before creating a new location to avoid duplicates!"""
+    db = SessionLocal()
+    try:
+        query = db.query(Location)
+        if region_id:
+            query = query.filter(Location.region_id == region_id)
+        locations = query.all()
+        
+        results = []
+        for loc in locations:
+            # Filter by search term if provided
+            if search:
+                search_lower = search.lower()
+                if search_lower not in loc.name.lower() and (not loc.description or search_lower not in loc.description.lower()):
+                    continue
+            results.append({
+                "id": loc.id,
+                "name": loc.name,
+                "type": loc.location_type,
+                "region_id": loc.region_id
+            })
+        return results
+    finally:
+        db.close()
+
+
+@tool
+def create_location(name: str, description: str, location_type: Optional[str] = None,
+                    region_id: Optional[int] = None, danger_modifier: Optional[int] = None,
+                    wealth_modifier: Optional[int] = None, accessibility: Optional[str] = None) -> dict:
+    """Create a new location. FIRST use list_locations to check if it already exists!
+    
+    Args:
+        region_id: Link to a region for consistent world-building
+        danger_modifier: Adjust region danger (-2 to +2)
+        accessibility: public, restricted, hidden, secret
+    """
     db = SessionLocal()
     try:
         location = Location(
             name=name,
             description=description,
-            location_type=location_type
+            location_type=location_type,
+            region_id=region_id,
+            danger_modifier=danger_modifier,
+            wealth_modifier=wealth_modifier,
+            accessibility=accessibility
         )
         db.add(location)
         db.commit()
@@ -674,7 +732,8 @@ def create_location(name: str, description: str, location_type: Optional[str] = 
         return {
             "created": True,
             "location_id": location.id,
-            "name": name
+            "name": name,
+            "region_id": region_id
         }
     finally:
         db.close()
@@ -1091,6 +1150,95 @@ def drop_item(player_id: int, item_instance_id: int, location_id: int) -> dict:
 
 
 @tool
+def set_companion_follow(npc_id: int, player_id: int) -> dict:
+    """Make an NPC follow a player as a companion.
+    
+    The NPC will automatically move with the player when they change locations.
+    Use this when an NPC agrees to join the player or is recruited.
+    The NPC should be willing (positive relationship/disposition) or have story reason.
+    """
+    db = SessionLocal()
+    try:
+        npc = db.query(NonPlayerCharacter).filter(NonPlayerCharacter.id == npc_id).first()
+        if not npc:
+            return {"error": f"NPC with id {npc_id} not found"}
+        
+        player = db.query(PlayerCharacter).filter(PlayerCharacter.id == player_id).first()
+        if not player:
+            return {"error": f"Player with id {player_id} not found"}
+        
+        # Set NPC to follow player and move to player's location
+        npc.following_player_id = player_id
+        npc.location_id = player.current_location_id
+        db.commit()
+        
+        return {
+            "success": True,
+            "companion": npc.name,
+            "now_following": player.name,
+            "message": f"{npc.name} is now following {player.name}"
+        }
+    finally:
+        db.close()
+
+
+@tool
+def dismiss_companion(npc_id: int) -> dict:
+    """Stop an NPC from following a player.
+    
+    Use when player tells a companion to stay, wait, or leave.
+    The NPC will remain at their current location.
+    """
+    db = SessionLocal()
+    try:
+        npc = db.query(NonPlayerCharacter).filter(NonPlayerCharacter.id == npc_id).first()
+        if not npc:
+            return {"error": f"NPC with id {npc_id} not found"}
+        
+        if not npc.following_player_id:
+            return {"error": f"{npc.name} is not currently following anyone"}
+        
+        player = db.query(PlayerCharacter).filter(PlayerCharacter.id == npc.following_player_id).first()
+        player_name = player.name if player else "the player"
+        
+        npc.following_player_id = None
+        db.commit()
+        
+        location = db.query(Location).filter(Location.id == npc.location_id).first()
+        location_name = location.name if location else "their current location"
+        
+        return {
+            "success": True,
+            "companion": npc.name,
+            "stayed_at": location_name,
+            "message": f"{npc.name} will wait at {location_name}"
+        }
+    finally:
+        db.close()
+
+
+@tool
+def get_player_companions(player_id: int) -> List[dict]:
+    """Get all NPCs currently following a player as companions."""
+    db = SessionLocal()
+    try:
+        companions = db.query(NonPlayerCharacter).filter(
+            NonPlayerCharacter.following_player_id == player_id
+        ).all()
+        
+        return [{
+            "id": npc.id,
+            "name": npc.name,
+            "type": npc.npc_type,
+            "health": npc.health,
+            "max_health": npc.max_health,
+            "behavior": npc.behavior_state.value if npc.behavior_state else "passive"
+        } for npc in companions]
+    finally:
+        db.close()
+
+
+@tool
 def search_memories(player_id: int, query: str) -> List[dict]:
     """Search through past session memories for relevant information.
     
@@ -1124,6 +1272,189 @@ def recall_session_details(session_id: str) -> dict:
     
     memory_manager = get_memory_manager()
     return memory_manager.get_session_details(session_id, message_limit=10)
+
+
+# ============= Region Tools =============
+
+@tool
+def get_region_info(region_id: int) -> dict:
+    """Get detailed information about a region including its characteristics.
+    
+    Returns region description, dominant races, wealth, climate, political structure,
+    danger level, and notable features.
+    """
+    db = SessionLocal()
+    try:
+        region = db.query(Region).filter(Region.id == region_id).first()
+        if not region:
+            return {"error": f"Region with id {region_id} not found"}
+        
+        # Get locations in this region
+        locations = db.query(Location).filter(Location.region_id == region_id).all()
+        
+        return {
+            "id": region.id,
+            "name": region.name,
+            "description": region.description,
+            "dominant_races": region.dominant_race_description,
+            "wealth_level": region.wealth_level.value if region.wealth_level else None,
+            "wealth_description": region.wealth_description,
+            "climate": region.climate.value if region.climate else None,
+            "terrain": region.terrain_description,
+            "political": region.political_description,
+            "danger_level": region.danger_level.value if region.danger_level else None,
+            "threats": region.threats_description,
+            "history": region.history_description,
+            "notable_features": region.notable_features,
+            "locations": [{"id": loc.id, "name": loc.name, "type": loc.location_type} for loc in locations]
+        }
+    finally:
+        db.close()
+
+
+@tool
+def list_regions() -> List[dict]:
+    """Get a list of all regions in the world."""
+    db = SessionLocal()
+    try:
+        regions = db.query(Region).all()
+        return [{
+            "id": r.id,
+            "name": r.name,
+            "climate": r.climate.value if r.climate else None,
+            "wealth_level": r.wealth_level.value if r.wealth_level else None,
+            "danger_level": r.danger_level.value if r.danger_level else None
+        } for r in regions]
+    finally:
+        db.close()
+
+
+@tool
+def create_region(name: str, description: str,
+                  dominant_race_description: Optional[str] = None,
+                  wealth_level: str = "modest",
+                  wealth_description: Optional[str] = None,
+                  climate: str = "temperate",
+                  terrain_description: Optional[str] = None,
+                  political_description: Optional[str] = None,
+                  danger_level: str = "low",
+                  threats_description: Optional[str] = None,
+                  history_description: Optional[str] = None,
+                  notable_features: Optional[str] = None) -> dict:
+    """Create a new region in the world.
+    
+    Regions contain multiple locations and define their shared characteristics.
+    Use region info to guide location and NPC creation within it.
+    
+    wealth_level: destitute, poor, modest, prosperous, opulent
+    climate: temperate, tropical, arid, arctic, mountainous, coastal, swamp, forest
+    danger_level: safe, low, moderate, high, deadly
+    """
+    db = SessionLocal()
+    try:
+        # Convert string enums
+        try:
+            wealth = WealthLevel(wealth_level)
+        except ValueError:
+            wealth = WealthLevel.MODEST
+        
+        try:
+            clim = ClimateType(climate)
+        except ValueError:
+            clim = ClimateType.TEMPERATE
+        
+        try:
+            danger = DangerLevel(danger_level)
+        except ValueError:
+            danger = DangerLevel.LOW
+        
+        region = Region(
+            name=name,
+            description=description,
+            dominant_race_description=dominant_race_description,
+            wealth_level=wealth,
+            wealth_description=wealth_description,
+            climate=clim,
+            terrain_description=terrain_description,
+            political_description=political_description,
+            danger_level=danger,
+            threats_description=threats_description,
+            history_description=history_description,
+            notable_features=notable_features
+        )
+        db.add(region)
+        db.commit()
+        db.refresh(region)
+        
+        return {
+            "created": True,
+            "region_id": region.id,
+            "name": region.name
+        }
+    finally:
+        db.close()
+
+
+@tool
+def update_region(region_id: int,
+                  description: Optional[str] = None,
+                  threats_description: Optional[str] = None,
+                  danger_level: Optional[str] = None,
+                  notable_features: Optional[str] = None) -> dict:
+    """Update a region's properties.
+    
+    Use to evolve regions over time - e.g., after major events change danger levels.
+    """
+    db = SessionLocal()
+    try:
+        region = db.query(Region).filter(Region.id == region_id).first()
+        if not region:
+            return {"error": f"Region with id {region_id} not found"}
+        
+        if description:
+            region.description = description
+        if threats_description:
+            region.threats_description = threats_description
+        if danger_level:
+            try:
+                region.danger_level = DangerLevel(danger_level)
+            except ValueError:
+                pass
+        if notable_features:
+            region.notable_features = notable_features
+        
+        db.commit()
+        return {"updated": True, "region_id": region_id, "name": region.name}
+    finally:
+        db.close()
+
+
+@tool
+def assign_location_to_region(location_id: int, region_id: int) -> dict:
+    """Assign a location to a region.
+    
+    Locations inherit regional context (climate, races, wealth, danger).
+    """
+    db = SessionLocal()
+    try:
+        location = db.query(Location).filter(Location.id == location_id).first()
+        if not location:
+            return {"error": f"Location with id {location_id} not found"}
+        
+        region = db.query(Region).filter(Region.id == region_id).first()
+        if not region:
+            return {"error": f"Region with id {region_id} not found"}
+        
+        location.region_id = region_id
+        db.commit()
+        
+        return {
+            "assigned": True,
+            "location": location.name,
+            "region": region.name
+        }
+    finally:
+        db.close()
 
 
 def get_game_tools():
@@ -1164,12 +1495,23 @@ def get_game_tools():
         update_npc_behavior,
         update_npc_disposition,
         create_npc,
+        # Companion management
+        set_companion_follow,
+        dismiss_companion,
+        get_player_companions,
         # Relationship management
         update_relationship,
         # Quest management
         create_quest,
         update_quest_status,
         # World building
+        list_locations,
         create_location,
-        create_item_template
+        create_item_template,
+        # Region management
+        get_region_info,
+        list_regions,
+        create_region,
+        update_region,
+        assign_location_to_region
     ]

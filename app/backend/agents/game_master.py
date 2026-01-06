@@ -1,4 +1,5 @@
 import logging
+import uuid
 from typing import Optional, List
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
@@ -10,68 +11,31 @@ from config import settings
 from .state import GameState
 from .tools import get_game_tools
 from .chat_history_manager import get_history_manager
+from .prompts import GAME_MASTER_SYSTEM_PROMPT, format_session_start, format_archive_summary
+from .context_builder import format_context_for_prompt
 
 logger = logging.getLogger(__name__)
-
-
-GAME_MASTER_SYSTEM_PROMPT = """You are the Game Master for an immersive fantasy RPG.
-
-## Core Loop
-1. Use tools to query current state (player, location, NPCs, relationships)
-2. Narrate the scene in second person ("You see...")
-3. Use tools to apply consequences (damage, gold, relationship changes)
-4. Create meaningful story events when opportunities arise
-5. Give enemies in fight scenes chances to retaliate
-
-## Tools Available
-- Query: player info, locations, NPCs, items, relationships, memories
-- Modify: health, gold, inventory, quests, relationships, NPC state
-- Create: items (with buffs/flaws), NPCs, quests, locations
-
-## Items - Templates and Instances
-Templates = generic blueprints (e.g., "Hammer", "Sword", "Potion")
-Instances = specific items with custom_name, buffs, flaws
-
-WORKFLOW to create items:
-1. list_item_templates(search="\{keyword(Name|Type)\}") → find existing template for Name or templates for Type
-2. If none: create template first with generic_name
-3. create the specific item with link to generic template and custom name and unique buffs/flaws
-
-Buff/flaw examples: "sharp: +1 damage", "heirloom: +1 morale", "rusty: -1 durability", "heavy: +1 weight"
-
-## NPCs
-React based on relationship values (-100 to 100) and behavior states:
-passive, defensive, aggressive, hostile, protective
-
-## Combat
-- elaborate fight scenes
-- intercept player actions to create opportunities for conflict if they are unreasonable
-- give players oportunities to succeed if they are creative 
-
-## Style
-- Vivid but concise descriptions
-- Consequences matter - combat can kill
-- Balance drama with lighter moments"""
 
 
 class GameMasterAgent:
     """LangGraph-based Game Master agent for the RPG."""
     
-    def __init__(self, model_name: Optional[str] = None, reasoning_effort: str = "low"):
+    def __init__(self, model_name: Optional[str] = None):
         self.model_name = model_name or settings.OPENAI_MODEL
-        self.reasoning_effort = reasoning_effort
         self.tools = get_game_tools()
         self.llm = ChatOpenAI(
             model=self.model_name,
             api_key=settings.OPENAI_API_KEY,
-            temperature=0.8,
-            reasoning_effort=reasoning_effort
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS,
+            reasoning_effort=settings.LLM_REASONING_EFFORT
         ).bind_tools(self.tools)
         # Separate LLM for summarization (no tools needed)
         self.summary_llm = ChatOpenAI(
             model=self.model_name,
             api_key=settings.OPENAI_API_KEY,
-            temperature=0.3
+            temperature=settings.SUMMARY_LLM_TEMPERATURE,
+            max_tokens=settings.SUMMARY_LLM_MAX_TOKENS
         )
         self.memory = MemorySaver()
         self.graph = self._build_graph()
@@ -82,18 +46,7 @@ class GameMasterAgent:
         Returns:
             Tuple of (summary, title, keywords)
         """
-        prompt = f"""Summarize this RPG session conversation concisely. Extract:
-1. A short title (max 50 chars)
-2. A brief summary (3-5 sentences capturing key events)
-3. Keywords (comma-separated: character names, locations, items, events)
-
-Conversation:
-{messages_text}
-
-Respond in this exact format:
-TITLE: <title>
-SUMMARY: <summary>
-KEYWORDS: <keywords>"""
+        prompt = format_archive_summary(messages_text)
         
         try:
             response = self.summary_llm.invoke([HumanMessage(content=prompt)])
@@ -132,14 +85,10 @@ KEYWORDS: <keywords>"""
         
         system_content = GAME_MASTER_SYSTEM_PROMPT
         
-        # Add session context
+        # Add rich session context (inventory, NPCs, items, quests)
         if state.get("session_context"):
-            ctx = state["session_context"]
-            system_content += f"\n\n## Current Session\n- Player ID: {state.get('player_id')}"
-            if ctx.get("player_name"):
-                system_content += f"\n- Player Name: {ctx['player_name']}"
-            if ctx.get("location"):
-                system_content += f"\n- Current Location: {ctx['location']}"
+            context_str = format_context_for_prompt(state["session_context"])
+            system_content += f"\n\n{context_str}"
         
         # Add previous session summaries for long-term memory
         if state.get("previous_summaries"):
@@ -197,20 +146,31 @@ KEYWORDS: <keywords>"""
         return workflow.compile(checkpointer=self.memory)
     
     def chat(self, message: str, player_id: int, session_id: str, 
-             session_context: Optional[dict] = None) -> tuple[str, List[dict]]:
+             session_context: Optional[dict] = None,
+             save_human_message: bool = True) -> tuple[str, List[dict]]:
         """Send a message to the Game Master and get a response.
+        
+        Args:
+            save_human_message: If False, don't save the human message to history.
+                               Used for internal prompts like session start.
         
         Returns:
             Tuple of (response_text, tool_calls_made)
         """
-        config = {"configurable": {"thread_id": session_id}}
+        # Use unique thread_id per invocation since we manage history in our database
+        # This prevents LangGraph's MemorySaver from accumulating old tool calls
+        config = {
+            "configurable": {"thread_id": f"{session_id}-{uuid.uuid4().hex[:8]}"},
+            "recursion_limit": 50  # Allow more tool calls for complex session starts
+        }
         history_manager = get_history_manager()
         
         # Ensure session exists in database
         history_manager.get_or_create_session(session_id, player_id)
         
-        # Save incoming human message
-        history_manager.save_human_message(session_id, message)
+        # Save incoming human message (skip for internal prompts)
+        if save_human_message:
+            history_manager.save_human_message(session_id, message)
         
         # Check if we need to archive old messages
         history_manager.check_and_archive_if_needed(
@@ -260,7 +220,8 @@ KEYWORDS: <keywords>"""
         
         return response_text, tool_calls_made
     
-    def start_session(self, player_id: int, session_id: str) -> tuple[str, List[dict]]:
+    def start_session(self, player_id: int, session_id: str, 
+                       session_context: Optional[dict] = None) -> tuple[str, List[dict]]:
         """Start a new game session with an introductory message.
         
         Analyzes the player's description/backstory and spawns relevant items and NPCs.
@@ -268,25 +229,11 @@ KEYWORDS: <keywords>"""
         Returns:
             Tuple of (response_text, tool_calls_made)
         """
-        intro_prompt = f"""A player (ID: {player_id}) is starting a new session. 
-
-First, use get_player_info to learn about this character.
-
-IMPORTANT - Backstory Setup:
-If the player has a description/backstory that mentions:
-- **Items they own**: give them those items with your tool calls
-  Example: "carries his father's sword" → create template for sword if not already created, then create his sword with exemplary buffs/flaws
-- **NPCs they know**: Use create_npc to spawn those characters at appropriate locations
-  Example: "best friend Marcus" → create_npc for Marcus with appropriate personality
-- **Relationships**: Use update_relationship to establish those connections
-
-After setup:
-1. Describe their current location
-2. Mention any active quests if they have one
-3. Set the scene and wait for their move
-"""
+        intro_prompt = format_session_start(player_id)
         
-        return self.chat(intro_prompt, player_id, session_id, {"player_name": None})
+        # Don't save the internal session start prompt to chat history
+        return self.chat(intro_prompt, player_id, session_id, session_context, 
+                        save_human_message=False)
 
 
 _game_master_instance: Optional[GameMasterAgent] = None

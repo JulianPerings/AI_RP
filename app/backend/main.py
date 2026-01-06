@@ -1,13 +1,22 @@
 import os
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 from database import Base, engine
 from api.routes import (
     player_character_router,
     non_player_character_router,
     item_template_router,
     item_instance_router,
+    region_router,
     location_router,
     quest_router,
     race_router,
@@ -49,6 +58,7 @@ app.include_router(player_character_router)
 app.include_router(non_player_character_router)
 app.include_router(item_template_router)
 app.include_router(item_instance_router)
+app.include_router(region_router)
 app.include_router(location_router)
 app.include_router(quest_router)
 app.include_router(race_router)

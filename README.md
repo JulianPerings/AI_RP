@@ -130,13 +130,16 @@ uvicorn main:app --reload
 ## Recent Updates
 
 ### Bug Fixes
-- Fixed tool calls accumulation (now only shows current turn's calls)
+- Fixed tool calls accumulation (unique thread per invocation)
+- Fixed session start prompt appearing in chat history
 - Fixed double session creation (player creation + start-session)
 - Fixed React StrictMode double-initialization
 
 ### New Features
+- **Region & Location System** - Locations link to regions with modifiers (danger, wealth, climate)
+- **Improved Storytelling** - No inventory dumps, no explicit options, concise prose
+- **Duplicate Prevention** - GM checks existing locations/NPCs before creating
+- **NPC Movement** - Escorts move with player, companions auto-follow
 - Item uniqueness system with buffs/flaws
 - Backstory parsing to auto-spawn items/NPCs
-- Starting gold and max health in character creation
-- Real-time stats refresh in chat view
 - Long-term memory system for session continuity

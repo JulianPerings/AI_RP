@@ -9,31 +9,9 @@ from openai import OpenAI
 from database import SessionLocal
 from models import ChatSession, ChatMessage
 from config import settings
+from .prompts import MEMORY_SUMMARY_PROMPT
 
 logger = logging.getLogger(__name__)
-
-
-SUMMARY_PROMPT = """Analyze this RPG game session conversation and provide:
-
-1. **Title**: A short 3-8 word title for this session (e.g., "Meeting Bob the Blacksmith")
-2. **Summary**: A 2-4 sentence summary of key events, decisions, and outcomes
-3. **Keywords**: Important names, places, items, and events (comma-separated)
-
-Focus on information that would be useful to recall later:
-- NPC names and their roles/relationships
-- Locations visited
-- Quests started/completed
-- Important items acquired
-- Key decisions made
-- Promises, debts, or unfinished business
-
-CONVERSATION:
-{conversation}
-
-Respond in this exact format:
-TITLE: [title here]
-SUMMARY: [summary here]
-KEYWORDS: [keyword1, keyword2, keyword3, ...]"""
 
 
 class MemoryManager:
@@ -75,7 +53,7 @@ class MemoryManager:
                 model=self.summary_model,
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant that summarizes RPG game sessions."},
-                    {"role": "user", "content": SUMMARY_PROMPT.format(conversation=conversation_text[:8000])}
+                    {"role": "user", "content": MEMORY_SUMMARY_PROMPT.format(conversation=conversation_text[:8000])}
                 ],
                 temperature=0.3,
                 max_tokens=500

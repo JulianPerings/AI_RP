@@ -1,12 +1,16 @@
+import logging
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.orm import Session
 
+logger = logging.getLogger(__name__)
+
 from database import get_db
 from models import PlayerCharacter
 from agents import create_game_master, get_history_manager, get_memory_manager
 from agents.chat_history_manager import ChatHistoryManager
+from agents.context_builder import build_session_context
 
 router = APIRouter(prefix="/game", tags=["game"])
 
@@ -50,10 +54,8 @@ def game_chat(request: ChatRequest, db: Session = Depends(get_db)):
     
     session_id = request.session_id or str(uuid.uuid4())
     
-    session_context = {
-        "player_name": player.name,
-        "location_id": player.current_location_id
-    }
+    # Build rich session context with inventory, NPCs, items, quests
+    session_context = build_session_context(db, request.player_id)
     
     gm = create_game_master()
     
@@ -91,10 +93,14 @@ def start_game_session(request: StartSessionRequest, db: Session = Depends(get_d
     
     gm = create_game_master()
     
+    # Build rich session context
+    session_context = build_session_context(db, request.player_id)
+    
     try:
         intro, tool_calls = gm.start_session(
             player_id=request.player_id,
-            session_id=session_id
+            session_id=session_id,
+            session_context=session_context
         )
         return StartSessionResponse(
             session_id=session_id,
@@ -103,6 +109,7 @@ def start_game_session(request: StartSessionRequest, db: Session = Depends(get_d
             tool_calls=tool_calls
         )
     except Exception as e:
+        logger.exception(f"Game Master error in start_session: {e}")
         raise HTTPException(status_code=500, detail=f"Game Master error: {str(e)}")
 
 

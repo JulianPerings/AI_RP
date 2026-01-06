@@ -2,6 +2,7 @@ from .player_character import PlayerCharacter
 from .non_player_character import NonPlayerCharacter, BehaviorState
 from .item_template import ItemTemplate, ItemCategory, ItemRarity
 from .item_instance import ItemInstance, OwnerType
+from .region import Region, ClimateType, WealthLevel, DangerLevel
 from .location import Location
 from .quest import Quest
 from .race import Race
@@ -20,6 +21,10 @@ __all__ = [
     "ItemRarity",
     "ItemInstance",
     "OwnerType",
+    "Region",
+    "ClimateType",
+    "WealthLevel",
+    "DangerLevel",
     "Location",
     "Quest",
     "Race",

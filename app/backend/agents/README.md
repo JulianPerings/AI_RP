@@ -9,7 +9,7 @@
 │                   Game Master Agent                  │
 │  (LangGraph + gpt-5-mini + reasoning_effort=low)   │
 ├─────────────────────────────────────────────────────┤
-│  Tools: 32 database operations                       │
+│  Tools: 41 database operations                       │
 │  Memory: Rolling sessions + Auto-summarization       │
 │  State: Player context, location, messages, summaries│
 └─────────────────────────────────────────────────────┘
@@ -18,10 +18,34 @@
 ## Files
 
 - `game_master.py` - **GameMasterAgent** - Main LangGraph agent with narrative generation and reasoning
-- `tools.py` - Database tools the agent can invoke (32 tools)
+- `tools.py` - Database tools the agent can invoke (41 tools)
 - `state.py` - **GameState** TypedDict for agent state management
 - `chat_history_manager.py` - Database-backed conversation persistence
 - `memory_manager.py` - **MemoryManager** - Long-term memory with session summaries and search
+- `prompts.py` - **Centralized LLM prompts** - All prompts separated from code logic
+- `context_builder.py` - **Session context builder** - Builds rich context with inventory, NPCs, items, quests
+
+## Prompts Module
+
+All LLM prompts are centralized in `prompts.py` for easy management:
+
+| Prompt | Purpose |
+|--------|--------|
+| `GAME_MASTER_SYSTEM_PROMPT` | Core GM persona, tools guide, and style instructions |
+| `SESSION_START_PROMPT` | Backstory parsing and session initialization |
+| `ARCHIVE_SUMMARY_PROMPT` | Summarizing messages for rolling archives |
+| `MEMORY_SUMMARY_PROMPT` | Detailed session summaries for long-term memory |
+
+**Helper functions:**
+- `format_session_start(player_id)` - Format session start with player ID
+- `format_archive_summary(messages_text)` - Format archive summary prompt
+- `format_memory_summary(conversation)` - Format memory summary prompt
+
+**Benefits:**
+- Review/modify prompts without touching code logic
+- Version control prompt changes separately
+- Test different prompt variations easily
+- Share prompts across multiple agents
 
 ## Game Master Agent
 
@@ -31,7 +55,16 @@ The `GameMasterAgent` is a stateful LangGraph agent that:
 - Manages game state (health, gold, inventory, quests)
 - Creates drama through challenges and moral dilemmas
 
-### Tools Available (32 total)
+### Storytelling Guidelines
+The GM follows strict narrative rules:
+- **No inventory dumps** - Don't list items unless player asks
+- **No explicit options** - End with atmosphere/NPC action, not "What do you do? A/B/C"
+- **Move NPCs** - When escorting player, use `move_npc` to move the NPC too
+- **Trust the player** - They know their situation; don't summarize
+- **Avoid duplicates** - Check existing locations/NPCs/items before creating new ones
+- **Concise prose** - Aim for paragraphs, not essays
+
+### Tools Available (41 total)
 
 **Query Tools:**
 | Tool | Description |
@@ -80,7 +113,7 @@ All item creation tools now accept optional `buffs` and `flaws` parameters to ma
 | `update_player_health` | Apply damage or healing |
 | `update_player_gold` | Add/remove gold |
 | `update_player_experience` | Add XP, auto level-up |
-| `move_player` | Change player location |
+| `move_player` | Change player location (companions auto-move) |
 
 **NPC Management:**
 | Tool | Description |
@@ -90,6 +123,13 @@ All item creation tools now accept optional `buffs` and `flaws` parameters to ma
 | `update_npc_behavior` | Change behavior state |
 | `update_npc_disposition` | Adjust NPC attitude |
 | `create_npc` | Spawn new NPC in world |
+
+**Companion Management:**
+| Tool | Description |
+|------|-------------|
+| `set_companion_follow` | Make NPC follow player (auto-moves with player) |
+| `dismiss_companion` | Stop NPC from following (stays at current location) |
+| `get_player_companions` | List NPCs following a player |
 
 **Relationship & Quest:**
 | Tool | Description |
@@ -101,8 +141,18 @@ All item creation tools now accept optional `buffs` and `flaws` parameters to ma
 **World Building:**
 | Tool | Description |
 |------|-------------|
-| `create_location` | Create new area |
+| `list_locations` | List/search locations (check before creating!) |
+| `create_location` | Create new area with region_id, modifiers |
 | `create_item_template` | Define new item type |
+
+**Region Management:**
+| Tool | Description |
+|------|-------------|
+| `get_region_info` | Get region details (races, wealth, climate, danger) |
+| `list_regions` | List all world regions |
+| `create_region` | Create new region with characteristics |
+| `update_region` | Update region properties |
+| `assign_location_to_region` | Link location to a region |
 
 ## Item System - IMPORTANT
 
@@ -207,10 +257,17 @@ Messages: 11...20 → When MAX_MESSAGES_BEFORE_ARCHIVE reached:
 
 ### Context Building
 Each LLM call includes:
-1. **System prompt** - Core GM instructions
-2. **Previous summaries** - Last N archived session summaries (configurable)
-3. **Recent messages** - Last 10 messages from active session
-4. **Session context** - Current player, location info
+1. **System prompt** - Core GM instructions (~800 tokens)
+2. **Rich session context** - Built by `context_builder.py`:
+   - Player stats (name, class, level, health, gold)
+   - Current location details
+   - **Full inventory** with equipped status
+   - **NPCs at location** with behavior/health
+   - **Items on ground** with instance_ids for pickup
+   - **Active quests** with completion status
+   - Hints to use tool calls for detailed info
+3. **Previous summaries** - Last 5 archived session summaries
+4. **Recent messages** - Last 15-30 messages from active session
 
 ### Archived Session Access
 Archived sessions retain:
@@ -223,13 +280,26 @@ Access via `get_session_with_messages(session_id)` or memory search tools.
 ## Configuration
 
 Settings in `config.py`:
+
+**LLM Settings** (gpt-5-mini: 400k context, 128k max output, reasoning support):
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `OPENAI_API_KEY` | - | Required for LLM calls |
 | `OPENAI_MODEL` | gpt-5-mini | Model to use |
-| `MIN_MESSAGES_IN_SESSION` | 10 | Messages to keep in active session |
-| `MAX_MESSAGES_BEFORE_ARCHIVE` | 20 | Trigger archiving at this count |
-| `SUMMARIES_IN_CONTEXT` | 3 | Previous summaries to include in context |
+| `LLM_TEMPERATURE` | 0.8 | Creativity (0.0-2.0), higher = more creative |
+| `LLM_MAX_TOKENS` | 8192 | Max response tokens (model supports up to 128k) |
+| `LLM_REASONING_EFFORT` | low | Reasoning depth: "low", "medium", "high" |
+| `SUMMARY_LLM_TEMPERATURE` | 0.3 | Lower temp for consistent summaries |
+| `SUMMARY_LLM_MAX_TOKENS` | 500 | Summary responses are short |
+
+**Session Management:**
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `MIN_MESSAGES_IN_SESSION` | 15 | Messages to keep in active session after archiving |
+| `MAX_MESSAGES_BEFORE_ARCHIVE` | 30 | Trigger archiving at this count |
+| `SUMMARIES_IN_CONTEXT` | 5 | Previous summaries to include in context |
+
+**Environment Override:** All settings can be overridden via `.env` file or environment variables.
 
 ---
 
