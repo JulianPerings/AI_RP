@@ -3,7 +3,7 @@
 **Purpose**: SQLAlchemy ORM models defining database schema for the AI RPG.
 
 ## Core Entity Models
-- `player_character.py` - PlayerCharacter (name, class, level, health, gold, race, faction, reputation, **current_session_id**)
+- `player_character.py` - PlayerCharacter (name, class, level, health, gold, **luck**, race, faction, reputation, **current_session_id**)
 - `non_player_character.py` - NonPlayerCharacter (name, type, health, behavior_state, base_disposition, race, faction, personality_traits, **following_player_id**)
 - `item_template.py` - **ItemTemplate** - Item blueprints (name, category, rarity, weight, properties, requirements)
 - `item_instance.py` - **ItemInstance** - Actual items in world (template_id, owner, location, equipped, quantity, durability, enchantments)

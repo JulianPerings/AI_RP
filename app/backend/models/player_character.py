@@ -13,6 +13,7 @@ class PlayerCharacter(Base):
     max_health = Column(Integer, default=100)
     experience = Column(Integer, default=0)
     gold = Column(Integer, default=0)
+    luck = Column(Integer, default=3)  # Currency for rerolling dice
     description = Column(Text)
     current_location_id = Column(Integer)
     current_session_id = Column(String(100), nullable=True)  # Active chat session

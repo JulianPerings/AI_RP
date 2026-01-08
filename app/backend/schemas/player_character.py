@@ -10,6 +10,7 @@ class PlayerCharacterCreate(BaseModel):
     max_health: int = 100
     experience: int = 0
     gold: int = 0
+    luck: int = 3
     description: Optional[str] = None
     current_location_id: Optional[int] = None
     race_id: Optional[int] = None
@@ -25,6 +26,7 @@ class PlayerCharacterResponse(BaseModel):
     max_health: int
     experience: int
     gold: int
+    luck: int
     description: Optional[str]
     current_location_id: Optional[int]
     current_session_id: Optional[str]

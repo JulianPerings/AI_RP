@@ -89,3 +89,19 @@ export async function getItemTemplate(templateId) {
   if (!res.ok) throw new Error('Failed to fetch item template');
   return res.json();
 }
+
+export async function rollDice(playerId, useLuck = false) {
+  const res = await fetch(`${API_BASE}/game/roll-dice`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      player_id: playerId,
+      use_luck: useLuck
+    })
+  });
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.detail || 'Failed to roll dice');
+  }
+  return res.json();
+}

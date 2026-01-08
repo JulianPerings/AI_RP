@@ -1,4 +1,5 @@
 import logging
+import random
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
@@ -46,6 +47,18 @@ class AutocompleteRequest(BaseModel):
 
 class AutocompleteResponse(BaseModel):
     suggestion: str
+
+
+class DiceRollRequest(BaseModel):
+    player_id: int
+    use_luck: bool = False  # If true, spend luck to reroll
+
+
+class DiceRollResponse(BaseModel):
+    roll: int
+    luck_remaining: int
+    is_critical: bool  # 20 = critical success, 1 = critical fail
+    is_fumble: bool
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -149,6 +162,37 @@ def handle_autocomplete(request: AutocompleteRequest, db: Session = Depends(get_
     except Exception as e:
         logger.exception(f"Autocomplete error: {e}")
         raise HTTPException(status_code=500, detail=f"Autocomplete error: {str(e)}")
+
+
+@router.post("/roll-dice", response_model=DiceRollResponse)
+def roll_dice(request: DiceRollRequest, db: Session = Depends(get_db)):
+    """
+    Roll a d20 for the player's action.
+    
+    - Regular roll: Just returns the dice result
+    - Use luck: Spends 1 luck point to reroll (requires luck > 0)
+    """
+    player = db.query(PlayerCharacter).filter(PlayerCharacter.id == request.player_id).first()
+    if not player:
+        raise HTTPException(status_code=404, detail=f"Player with id {request.player_id} not found")
+    
+    # Check if using luck for reroll
+    if request.use_luck:
+        if player.luck <= 0:
+            raise HTTPException(status_code=400, detail="No luck remaining for reroll")
+        player.luck -= 1
+        db.commit()
+        logger.info(f"Player {player.name} used luck to reroll. Luck remaining: {player.luck}")
+    
+    # Roll d20
+    roll = random.randint(1, 20)
+    
+    return DiceRollResponse(
+        roll=roll,
+        luck_remaining=player.luck,
+        is_critical=(roll == 20),
+        is_fumble=(roll == 1)
+    )
 
 
 @router.get("/health")

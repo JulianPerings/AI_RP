@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { getPlayer, startSession, sendMessage, getChatHistory, autocompleteAction, getPlayerInventory, getItemTemplate } from '../api'
+import { getPlayer, startSession, sendMessage, getChatHistory, autocompleteAction, getPlayerInventory, getItemTemplate, rollDice } from '../api'
 
 const LOADING_MESSAGES = [
   "The Game Master is weaving your tale...",
@@ -29,6 +29,11 @@ function Chat() {
   const [showInventory, setShowInventory] = useState(false)
   const [inventory, setInventory] = useState([])
   const [loadingInventory, setLoadingInventory] = useState(false)
+  
+  // Dice rolling state
+  const [diceRoll, setDiceRoll] = useState(null)  // Current roll result
+  const [isRolling, setIsRolling] = useState(false)  // Animation state
+  const [diceAnimating, setDiceAnimating] = useState(false)  // Throw animation
   
   const messagesEndRef = useRef(null)
   const loadingIntervalRef = useRef(null)
@@ -161,12 +166,46 @@ function Chat() {
     }
   }
 
+  async function handleRollDice(useLuck = false) {
+    if (isRolling || sending) return
+    
+    setIsRolling(true)
+    setDiceAnimating(true)
+    
+    try {
+      const result = await rollDice(parseInt(playerId), useLuck)
+      
+      // Wait for throw animation
+      await new Promise(resolve => setTimeout(resolve, 600))
+      setDiceAnimating(false)
+      
+      // Update dice roll and player luck
+      setDiceRoll(result)
+      setPlayer(prev => ({ ...prev, luck: result.luck_remaining }))
+      
+    } catch (err) {
+      console.error('Dice roll failed:', err)
+      setDiceAnimating(false)
+    } finally {
+      setIsRolling(false)
+    }
+  }
+
   async function handleSend(e) {
     e.preventDefault()
     if (!input.trim() || sending || !player) return
 
-    const userMessage = input.trim()
+    // Build message with optional dice roll
+    let userMessage = input.trim()
+    if (diceRoll) {
+      const rollInfo = diceRoll.is_critical ? ' [CRITICAL SUCCESS - Natural 20!]' :
+                       diceRoll.is_fumble ? ' [CRITICAL FAIL - Natural 1!]' :
+                       ` [Rolled: ${diceRoll.roll}]`
+      userMessage = userMessage + rollInfo
+    }
+    
     setInput('')
+    setDiceRoll(null)  // Clear dice after sending
     setSending(true)
 
     // Add player message immediately
@@ -269,6 +308,10 @@ function Chat() {
             <span>💰</span>
             <span>{player?.gold}</span>
           </div>
+          <div className="stat-display luck">
+            <span>🍀</span>
+            <span>{player?.luck ?? 3}</span>
+          </div>
         </div>
       </div>
 
@@ -325,7 +368,7 @@ function Chat() {
               }
             }}
             placeholder={sending ? "The Game Master is responding..." : "What do you do? (Shift+Enter for new line)"}
-            disabled={sending || autocompleting}
+            disabled={sending || autocompleting || diceRoll}
             autoFocus
             rows={2}
           />
@@ -333,11 +376,24 @@ function Chat() {
             type="button"
             className="btn btn-secondary"
             onClick={handleAutocomplete}
-            disabled={sending || autocompleting}
+            disabled={sending || autocompleting || diceRoll}
             title="Generate or polish your action"
           >
             {autocompleting ? '...' : '✨'}
           </button>
+          
+          {/* Dice Roll Button */}
+          <button 
+            type="button"
+            className={`btn btn-dice ${!input.trim() ? 'disabled' : ''} ${diceRoll ? 'has-roll' : ''} ${diceAnimating ? 'throwing' : ''} ${diceRoll?.is_critical ? 'critical' : ''} ${diceRoll?.is_fumble ? 'fumble' : ''}`}
+            onClick={() => diceRoll ? (player?.luck > 0 ? handleRollDice(true) : null) : handleRollDice(false)}
+            disabled={!input.trim() || isRolling || sending || (diceRoll && player?.luck <= 0)}
+          >
+            <span className={`dice-icon ${diceAnimating ? 'animate-throw' : ''}`}>
+              {isRolling && !diceRoll ? '🎲' : diceRoll ? diceRoll.roll : '🎲'}
+            </span>
+          </button>
+          
           <button 
             type="submit" 
             className="btn btn-primary"

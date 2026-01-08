@@ -24,6 +24,16 @@ React-based frontend for the AI Game Master RPG.
   - Empty input → suggests contextual action based on situation
   - With input → polishes rough idea into narrative prose
   - Uses player context, location, NPCs for smart suggestions
+- **Dice Roll button (🎲)**:
+  - Type action first, then click to roll d20
+  - Animated throw animation
+  - Shows result with critical/fumble indicators
+  - Input locks after rolling - send or reroll
+  - **Reroll with Luck (🍀)**: Spend luck points to reroll
+  - Roll result appended to message for GM to interpret
+- **Inventory button (🎒)**:
+  - Opens modal showing all player items
+  - Shows equipped status, quantities, descriptions
 - **Loading indicator** while GM responds:
   - Input disabled during response
   - Animated quill + rotating flavor text
