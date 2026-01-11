@@ -20,11 +20,14 @@
 - `game_master.py` - **GameMasterAgent** - Main LangGraph agent with narrative generation and reasoning
 - `tools.py` - Database tools the agent can invoke (44 tools)
 - `state.py` - **GameState** TypedDict for agent state management
-- `chat_history_manager.py` - Database-backed conversation persistence
-- `memory_manager.py` - **MemoryManager** - Long-term memory with session summaries and search
+- `story_manager.py` - **StoryManager** - Simplified story storage in PlayerCharacter.story_messages
 - `prompts.py` - **Centralized LLM prompts** - All prompts separated from code logic
 - `context_builder.py` - **Session context builder** - Builds rich context with inventory, NPCs, items, quests
 - `autocomplete.py` - **Autocomplete handler** - Context-aware action suggestions for player input
+
+**Deprecated:**
+- `chat_history_manager.py` - Old session-based persistence (replaced by StoryManager)
+- `memory_manager.py` - Old memory system (to be refactored)
 
 ## Prompts Module
 
@@ -86,11 +89,45 @@ The GM follows strict narrative rules:
 | `get_player_inventory` | List player's items (returns **instance_id**) |
 | `get_npc_inventory` | List NPC's items (returns **instance_id**) |
 
+**Context-first (reduce tool calls):**
+- The GM receives session context that already includes player stats, local NPCs/items, combat state, and inventory with `instance_id` for each stack.
+- Prefer using IDs from context; use query tools as fallback when details are missing.
+
 **Long-Term Memory Tools:**
 | Tool | Description |
 |------|-------------|
 | `search_memories` | Search past session summaries by keyword |
 | `recall_session_details` | Get full details of a past session |
+
+**Combat Tools:**
+| Tool | Description |
+|------|-------------|
+| `initiate_combat` | Start combat (PC implied by player_id; provide ally/enemy NPC id lists) |
+| `get_active_combat` | Check if player is in active combat |
+| `add_combatant` | Add NPC/PC to an active combat |
+| `remove_combatant` | Remove combatant (fled, captured, etc.) |
+| `update_combat_hp` | Update HP in combat tracker (syncs with actual character) |
+| `end_combat` | End combat with outcome and narrative summary |
+
+**Starting Combat Params (IMPORTANT):**
+- `initiate_combat(player_id, description, player_team_ids=None, enemy_team_ids=[...])`
+- `player_team_ids`: optional ally NPC ids. The player's PC is automatically included via `player_id`.
+- `enemy_team_ids`: required enemy NPC ids.
+
+**Cinematic Combat Summaries:**
+- The `summary` passed to `end_combat` replaces the individual combat messages in the story log.
+- Write it as a tight, in-world story beat that flows naturally with the surrounding narrative.
+- Prefer **4-8 sentences** (roughly 70-140 words) and avoid rewriting the full exchange blow-by-blow.
+- Avoid meta headers (e.g. "COMBAT SUMMARY") and avoid bullet-point recaps.
+- End with a small forward hook (immediate aftermath / what the world does next).
+
+**Combat Tool Params (IMPORTANT):**
+- `player_id` refers to the *owner player* whose combat session is being tracked/modified.
+  Combat sessions are keyed per-player, so all combat tools take `player_id`.
+- `char_type` + `char_id` identify the *combatant* inside that combat:
+  - `char_type="PC"` → `char_id` is a `PlayerCharacter.id`
+  - `char_type="NPC"` → `char_id` is a `NonPlayerCharacter.id`
+- `team` is the side to join: `"player"` (allies) or `"enemy"`.
 
 **Item Transfer (uses instance_id):**
 | Tool | Description |
@@ -98,6 +135,10 @@ The GM follows strict narrative rules:
 | `pickup_item` | Player picks up item from ground |
 | `drop_item` | Player drops item at location |
 | `transfer_item` | Move item between any owners |
+| `consume_item_instance` | Decrement quantity for consumables/ammo; deletes stack at 0 |
+
+**Consumables & Ammo (IMPORTANT):**
+- When narration uses ammo/consumables (arrows, potions, bandages, etc.), first call `get_player_inventory` to find the correct `instance_id`, then call `consume_item_instance(instance_id, amount)`.
 
 **Item Creation (creates NEW items with optional buffs/flaws):**
 | Tool | Description |
@@ -218,11 +259,12 @@ response = gm.chat(
 ## API Endpoints
 
 The agent is exposed via `/game` routes:
-- `POST /game/start-session` - Begin new game session with intro narrative (now parses backstory to spawn items/NPCs)
-- `POST /game/chat` - Send player action, receive narrative response
+- `POST /game/start-session` - Begin new game session with intro narrative (parses backstory to spawn items/NPCs)
+- `POST /game/chat` - Send player action with optional tags, receive narrative response
+- `GET /game/story/{player_id}` - Get story messages for a player
+- `DELETE /game/story/{player_id}` - Clear story (reset)
 - `GET /game/health` - Check agent status
-- `GET /game/history/{session_id}` - Get chat history for a session
-- `GET /game/sessions/{player_id}` - Get all sessions for a player
+- `POST /game/roll-dice` - Roll d20 with optional luck reroll
 
 ### Start Session Enhancement (NEW)
 The `/game/start-session` endpoint now intelligently parses the player's `description` field:
@@ -241,50 +283,45 @@ Example: If player description says "carries his father's sword", the LLM will:
 - `GET /game/memory/all/{player_id}` - Get all player memories
 - `GET /game/memory/session/{session_id}` - Get full session details
 
-## Rolling Session Architecture
+## Story Architecture (Simplified)
 
-The system uses a rolling session model with automatic archiving and summarization.
+Stories are stored directly in `PlayerCharacter.story_messages` as a JSON array.
 
-### Session ID Format
-```
-{player_id}-{session_number}
-- {player_id}-0  → Current active session
-- {player_id}-1  → Most recent archive
-- {player_id}-2  → Older archive
-...
+### Message Format
+```json
+{
+  "role": "gm" | "player",
+  "content": "The message text...",
+  "tags": ["dice:15", "critical", "combat"],
+  "timestamp": "2024-01-15T10:30:00"
+}
 ```
 
-### Automatic Archiving Flow
-```
-Messages: 1...10  → Keep in active session ({player_id}-0)
-Messages: 11...20 → When MAX_MESSAGES_BEFORE_ARCHIVE reached:
-                    1. Archive oldest 10 messages to {player_id}-1
-                    2. Shift existing archives (1→2, 2→3...)
-                    3. Generate summary for archived session
-                    4. Continue with 10 messages in active session
-```
+### Tags
+Messages can be tagged for filtering and special handling:
+- `dice:N` - Player rolled N on d20
+- `critical` - Natural 20
+- `fumble` - Natural 1
+- `combat` - Combat-related message
+- `session_start` - Session intro message
 
 ### Context Building
 Each LLM call includes:
 1. **System prompt** - Core GM instructions (~800 tokens)
 2. **Rich session context** - Built by `context_builder.py`:
-   - Player stats (name, class, level, health, gold)
+   - Player stats (name, class, level, health, gold, luck)
    - Current location details
    - **Full inventory** with equipped status
    - **NPCs at location** with behavior/health
    - **Items on ground** with instance_ids for pickup
    - **Active quests** with completion status
-   - Hints to use tool calls for detailed info
-3. **Previous summaries** - Last 5 archived session summaries
-4. **Recent messages** - Last 15-30 messages from active session
+3. **Recent messages** - Last 20 messages from story_messages
 
-### Archived Session Access
-Archived sessions retain:
-- Full message history (for detailed review)
-- LLM-generated summary
-- Title and keywords (for search)
-
-Access via `get_session_with_messages(session_id)` or memory search tools.
+### Combat Compression (Future)
+When combat ends, all combat-tagged messages can be compressed into a single summary:
+```python
+story_manager.compress_tagged_messages(player_id, "combat:123", summary_text)
+```
 
 ## Configuration
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { getPlayer, startSession, sendMessage, getChatHistory, autocompleteAction, getPlayerInventory, getItemTemplate, rollDice } from '../api'
+import { getPlayer, startSession, sendMessage, getStory, autocompleteAction, getPlayerInventory, getItemTemplate, rollDice, getCombatState } from '../api'
+import CombatHud from '../components/CombatHud'
 
 const LOADING_MESSAGES = [
   "The Game Master is weaving your tale...",
@@ -29,6 +30,9 @@ function Chat() {
   const [showInventory, setShowInventory] = useState(false)
   const [inventory, setInventory] = useState([])
   const [loadingInventory, setLoadingInventory] = useState(false)
+
+  // Combat HUD state
+  const [combatState, setCombatState] = useState(null)
   
   // Dice rolling state
   const [diceRoll, setDiceRoll] = useState(null)  // Current roll result
@@ -79,14 +83,46 @@ function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
+  function formatStoryMessages(story) {
+    if (!story?.messages) return []
+    return story.messages.map(msg => ({
+      role: msg.role === 'player' ? 'player' : 'gm',
+      content: msg.content,
+      tags: msg.tags || [],
+      toolCalls: []
+    }))
+  }
+
+  function attachToolCallsToLatestGm(messagesList, toolCalls) {
+    if (!messagesList?.length) return messagesList
+    for (let i = messagesList.length - 1; i >= 0; i--) {
+      if (messagesList[i]?.role === 'gm') {
+        messagesList[i] = { ...messagesList[i], toolCalls: toolCalls || [] }
+        return messagesList
+      }
+    }
+    return messagesList
+  }
+
   async function initializeChat() {
     try {
       setLoading(true)
       const playerData = await getPlayer(playerId)
       setPlayer(playerData)
 
-      if (isNewCharacter || !playerData.current_session_id) {
-        // New character - start a fresh session
+      // Load combat state for HUD
+      try {
+        const cs = await getCombatState(parseInt(playerId))
+        setCombatState(cs)
+      } catch {
+        setCombatState(null)
+      }
+
+      // Try to load existing story
+      const story = await getStory(parseInt(playerId))
+      
+      if (isNewCharacter || !story.messages || story.messages.length === 0) {
+        // New character or no story - start a fresh session
         const session = await startSession(parseInt(playerId))
         setMessages([{
           role: 'gm',
@@ -94,29 +130,25 @@ function Chat() {
           toolCalls: session.tool_calls || []
         }])
       } else {
-        // Existing character - load chat history
-        try {
-          const history = await getChatHistory(playerData.current_session_id)
-          const formatted = history.messages.map(msg => ({
-            role: msg.role === 'human' ? 'player' : 'gm',
-            content: msg.content,
-            toolCalls: msg.tool_calls || []
-          }))
-          setMessages(formatted)
-        } catch (err) {
-          // No history yet, start new session
-          const session = await startSession(parseInt(playerId))
-          setMessages([{
-            role: 'gm',
-            content: session.intro,
-            toolCalls: session.tool_calls || []
-          }])
-        }
+        // Existing story - load messages
+        const formatted = formatStoryMessages(story)
+        setMessages(formatted)
       }
     } catch (err) {
       setError(err.message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function refreshCombat() {
+    try {
+      const cs = await getCombatState(parseInt(playerId))
+      setCombatState(cs)
+      return cs
+    } catch {
+      setCombatState(null)
+      return null
     }
   }
 
@@ -127,7 +159,6 @@ function Chat() {
     try {
       const result = await autocompleteAction(
         parseInt(playerId),
-        player.current_session_id,
         input.trim()
       )
       console.log('Autocomplete result:', result)
@@ -204,30 +235,49 @@ function Chat() {
       userMessage = userMessage + rollInfo
     }
     
+    // Build tags for the message BEFORE clearing diceRoll
+    const tags = diceRoll ? [`dice:${diceRoll.roll}`, diceRoll.is_critical ? 'critical' : diceRoll.is_fumble ? 'fumble' : null].filter(Boolean) : null
+    
     setInput('')
     setDiceRoll(null)  // Clear dice after sending
     setSending(true)
 
     // Add player message immediately
-    setMessages(prev => [...prev, { role: 'player', content: userMessage }])
+    setMessages(prev => [...prev, { role: 'player', content: userMessage, tags: tags || [] }])
 
     try {
       const response = await sendMessage(
         parseInt(playerId),
-        player.current_session_id,
-        userMessage
+        userMessage,
+        tags
       )
-      
-      // Add GM response
-      setMessages(prev => [...prev, {
-        role: 'gm',
-        content: response.response,
-        toolCalls: response.tool_calls || []
-      }])
+
+      const gmToolCalls = response.tool_calls || []
+      const endedCombatThisTurn = gmToolCalls.some(tc => tc?.tool === 'end_combat')
+
+      // If combat ended this turn, the backend does not persist this final GM response.
+      // Avoid showing it briefly in the UI; we'll sync from story (which contains the summary).
+      if (!endedCombatThisTurn) {
+        setMessages(prev => [...prev, {
+          role: 'gm',
+          content: response.response,
+          toolCalls: gmToolCalls
+        }])
+      }
       
       // Refresh player stats (health, gold may have changed)
       const updatedPlayer = await getPlayer(playerId)
       setPlayer(updatedPlayer)
+
+      // Refresh combat HUD (combat may have started/ended or HP changed)
+      const wasInCombat = !!combatState?.in_combat
+      const cs = await refreshCombat()
+
+      // Always sync messages from story after GM responds so server-side compression/tag edits
+      // (e.g. end_combat compression, retro-tagging) are reflected without manual reload.
+      const story = await getStory(parseInt(playerId))
+      const formatted = attachToolCallsToLatestGm(formatStoryMessages(story), gmToolCalls)
+      setMessages(formatted)
     } catch (err) {
       setError(err.message)
       // Remove the player message on error
@@ -314,6 +364,8 @@ function Chat() {
           </div>
         </div>
       </div>
+
+      <CombatHud combatState={combatState} />
 
       <div className="chat-messages">
         {messages.map((msg, idx) => (

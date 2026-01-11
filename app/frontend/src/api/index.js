@@ -32,23 +32,23 @@ export async function startSession(playerId) {
   return res.json();
 }
 
-export async function sendMessage(playerId, sessionId, message) {
+export async function sendMessage(playerId, message, tags = null) {
   const res = await fetch(`${API_BASE}/game/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       player_id: playerId,
-      session_id: sessionId,
-      message
+      message,
+      tags
     })
   });
   if (!res.ok) throw new Error('Failed to send message');
   return res.json();
 }
 
-export async function getChatHistory(sessionId) {
-  const res = await fetch(`${API_BASE}/game/history/${sessionId}`);
-  if (!res.ok) throw new Error('Failed to fetch history');
+export async function getStory(playerId, limit = 50) {
+  const res = await fetch(`${API_BASE}/game/story/${playerId}?limit=${limit}`);
+  if (!res.ok) throw new Error('Failed to fetch story');
   return res.json();
 }
 
@@ -64,13 +64,12 @@ export async function getRaces() {
   return res.json();
 }
 
-export async function autocompleteAction(playerId, sessionId, userInput = '') {
+export async function autocompleteAction(playerId, userInput = '') {
   const res = await fetch(`${API_BASE}/game/autocomplete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       player_id: playerId,
-      session_id: sessionId,
       user_input: userInput
     })
   });
@@ -103,5 +102,11 @@ export async function rollDice(playerId, useLuck = false) {
     const error = await res.json();
     throw new Error(error.detail || 'Failed to roll dice');
   }
+  return res.json();
+}
+
+export async function getCombatState(playerId) {
+  const res = await fetch(`${API_BASE}/game/combat/${playerId}`);
+  if (!res.ok) throw new Error('Failed to fetch combat state');
   return res.json();
 }

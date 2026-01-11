@@ -11,6 +11,7 @@ from .race_relationship import RaceRelationship
 from .faction_relationship import FactionRelationship, FactionRelationType
 from .character_relationship import CharacterRelationship, CharacterType, RelationType
 from .chat_history import ChatSession, ChatMessage
+from .combat_session import CombatSession
 
 __all__ = [
     "PlayerCharacter",
@@ -37,5 +38,6 @@ __all__ = [
     "CharacterType",
     "RelationType",
     "ChatSession",
-    "ChatMessage"
+    "ChatMessage",
+    "CombatSession"
 ]

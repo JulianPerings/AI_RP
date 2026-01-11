@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 from models import (
     PlayerCharacter, NonPlayerCharacter, Location, Quest,
-    ItemTemplate, ItemInstance, OwnerType, Region
+    ItemTemplate, ItemInstance, OwnerType, Region, CombatSession
 )
 from .prompts import RULEBOOK_REFERENCE
 
@@ -69,7 +69,7 @@ def build_session_context(db: Session, player_id: int) -> dict:
                     context["region_danger"] = region.danger_level.value if region.danger_level else None
                     context["region_threats"] = region.threats_description
     
-    # Player inventory summary
+    # Player inventory (include instance_ids so GM can consume/transfer without extra tool calls)
     inventory_items = db.query(ItemInstance).filter(
         ItemInstance.owner_type == OwnerType.PC,
         ItemInstance.owner_id == player_id
@@ -79,8 +79,15 @@ def build_session_context(db: Session, player_id: int) -> dict:
     for item in inventory_items:
         template = db.query(ItemTemplate).filter(ItemTemplate.id == item.template_id).first()
         item_name = item.custom_name or (template.name if template else "Unknown")
-        equipped_str = " [EQUIPPED]" if item.is_equipped else ""
-        inventory_summary.append(f"{item_name} (x{item.quantity}){equipped_str}")
+        inventory_summary.append({
+            "instance_id": item.id,
+            "template_id": item.template_id,
+            "name": item_name,
+            "quantity": item.quantity,
+            "is_equipped": item.is_equipped,
+            "buffs": item.buffs or [],
+            "flaws": item.flaws or [],
+        })
     
     context["inventory"] = inventory_summary
     context["inventory_count"] = len(inventory_summary)
@@ -159,6 +166,21 @@ def build_session_context(db: Session, player_id: int) -> dict:
     context["active_quests"] = quest_summary
     context["quest_count"] = len(quest_summary)
     
+    # Active combat (if any)
+    active_combat = db.query(CombatSession).filter(
+        CombatSession.player_id == player_id,
+        CombatSession.status == "active"
+    ).first()
+    
+    if active_combat:
+        context["in_combat"] = True
+        context["combat_id"] = active_combat.id
+        context["combat_description"] = active_combat.description
+        context["combat_player_team"] = active_combat.team_player
+        context["combat_enemy_team"] = active_combat.team_enemy
+    else:
+        context["in_combat"] = False
+    
     return context
 
 
@@ -200,13 +222,20 @@ def format_context_for_prompt(context: dict) -> str:
     # Inventory
     lines.append(f"\n## Inventory ({context.get('inventory_count', 0)} items)")
     if context.get("inventory"):
-        for item in context["inventory"][:10]:  # Show first 10
-            lines.append(f"- {item}")
-        if context.get("inventory_count", 0) > 10:
-            lines.append(f"- ...and {context['inventory_count'] - 10} more (use get_player_inventory for full list)")
+        for item in context["inventory"][:12]:  # Show first 12
+            if isinstance(item, dict):
+                equipped_str = " [EQUIPPED]" if item.get("is_equipped") else ""
+                lines.append(
+                    f"- {item.get('name', 'Unknown')} x{item.get('quantity', 1)}{equipped_str} "
+                    f"(instance_id:{item.get('instance_id')}, template_id:{item.get('template_id')})"
+                )
+            else:
+                lines.append(f"- {item}")
+        if context.get("inventory_count", 0) > 12:
+            lines.append(f"- ...and {context['inventory_count'] - 12} more")
     else:
         lines.append("- Empty")
-    lines.append("*(Use get_player_inventory for instance_ids needed for transfers)*")
+    lines.append("*(Use consume_item_instance(instance_id, amount) for ammo/consumables; transfer_item uses instance_id too. Use get_player_inventory only if you need full details.)*")
     
     # Companions
     lines.append(f"\n## Companions ({context.get('companion_count', 0)})")
@@ -248,6 +277,53 @@ def format_context_for_prompt(context: dict) -> str:
     else:
         lines.append("- None")
     lines.append("*(Use get_player_quests for full quest details)*")
+    
+    # Active Combat (shown prominently if in combat)
+    if context.get("in_combat"):
+        combat_block = []
+        combat_block.append("=" * 60)
+        combat_block.append(f"# ⚔️ ACTIVE COMBAT: {context.get('combat_description', 'Battle in progress')}")
+        combat_block.append("=" * 60)
+        combat_block.append("")
+        combat_block.append("⚠️ COMBAT IS ACTIVE - Do NOT call initiate_combat!")
+        combat_block.append("")
+        
+        # Player team
+        combat_block.append("**Your Team:**")
+        for m in context.get("combat_player_team", []):
+            hp_pct = int((m.get("hp", 0) / max(m.get("max_hp", 1), 1)) * 100)
+            status = "💀 DOWN" if m.get("hp", 0) <= 0 else f"{hp_pct}%"
+            combat_block.append(f"  - {m.get('name')} ({m.get('type')} ID:{m.get('id')}): {m.get('hp')}/{m.get('max_hp')} ({status})")
+        
+        # Enemy team
+        combat_block.append("")
+        combat_block.append("**Enemy Team:**")
+        all_enemies_down = True
+        for m in context.get("combat_enemy_team", []):
+            hp_pct = int((m.get("hp", 0) / max(m.get("max_hp", 1), 1)) * 100)
+            if m.get("hp", 0) > 0:
+                all_enemies_down = False
+            status = "💀 DOWN" if m.get("hp", 0) <= 0 else f"{hp_pct}%"
+            combat_block.append(f"  - {m.get('name')} ({m.get('type')} ID:{m.get('id')}): {m.get('hp')}/{m.get('max_hp')} ({status})")
+        
+        combat_block.append("")
+        combat_block.append("**Available Actions:**")
+        combat_block.append("  - `update_combat_hp(player_id, char_type, char_id, new_hp)` → after dealing/taking damage")
+        combat_block.append("  - `add_combatant(...)` → reinforcements join")
+        combat_block.append("  - `remove_combatant(...)` → someone flees/is captured")
+        
+        # Hint if all enemies are down
+        if all_enemies_down:
+            combat_block.append("")
+            combat_block.append("🏆 ALL ENEMIES DOWN! Call `end_combat(player_id, 'victory', 'summary...')` to end combat!")
+        else:
+            combat_block.append("  - `end_combat(player_id, outcome, summary)` → when combat concludes")
+        
+        combat_block.append("")
+        combat_block.append("=" * 60)
+        
+        # Insert at the very top
+        lines.insert(0, "\n".join(combat_block))
     
     # Rulebook reference for world-building
     lines.append(f"\n---\n# World Building Rulebook\n{RULEBOOK_REFERENCE}")

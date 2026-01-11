@@ -87,13 +87,13 @@ function PlayerList() {
                 <span className="stat stat-gold">💰 {player.gold}</span>
                 <span className="stat stat-exp">✨ {player.experience} XP</span>
               </div>
-              {player.current_session_id && (
+              {player.story_messages && player.story_messages.length > 0 && (
                 <p style={{ 
                   marginTop: '0.75rem', 
                   fontSize: '0.75rem',
                   color: 'var(--success)'
                 }}>
-                  📖 Active Session
+                  📖 {player.story_messages.length} story messages
                 </p>
               )}
             </div>

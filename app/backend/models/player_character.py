@@ -16,8 +16,11 @@ class PlayerCharacter(Base):
     luck = Column(Integer, default=3)  # Currency for rerolling dice
     description = Column(Text)
     current_location_id = Column(Integer)
-    current_session_id = Column(String(100), nullable=True)  # Active chat session
     race_id = Column(Integer, ForeignKey("race.id"))
+    
+    # Story messages as JSON list - simple, no foreign keys
+    # Format: [{"role": "gm"|"player", "content": "...", "tags": [...], "timestamp": "..."}]
+    story_messages = Column(JSON, default=list)
     primary_faction_id = Column(Integer, ForeignKey("faction.id"))
     reputation = Column(JSON, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

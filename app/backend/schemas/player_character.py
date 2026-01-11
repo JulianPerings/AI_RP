@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, Dict
+from typing import Optional, Dict, List, Any
 from datetime import datetime
 
 class PlayerCharacterCreate(BaseModel):
@@ -29,10 +29,10 @@ class PlayerCharacterResponse(BaseModel):
     luck: int
     description: Optional[str]
     current_location_id: Optional[int]
-    current_session_id: Optional[str]
     race_id: Optional[int]
     primary_faction_id: Optional[int]
     reputation: Optional[Dict[str, int]]
+    story_messages: Optional[List[Any]] = None
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
 

@@ -20,6 +20,12 @@ React-based frontend for the AI Game Master RPG.
 ### 3. Chat (`/chat/:playerId`)
 - Real-time chat with the AI Game Master
 - Shows tool calls made by the LLM
+- **Combat HUD (⚔️)**:
+  - Automatically appears when the player is in active combat
+  - Shows both teams with individual HP bars and DOWN/OK status
+  - Collapsible by default (Show/Hide) for a compact chat experience
+  - Auto-refreshes after each message
+  - Uses backend endpoint: `GET /api/game/combat/{player_id}`
 - **Autocomplete button (✨)**: 
   - Empty input → suggests contextual action based on situation
   - With input → polishes rough idea into narrative prose
@@ -38,6 +44,7 @@ React-based frontend for the AI Game Master RPG.
   - Input disabled during response
   - Animated quill + rotating flavor text
   - Prevents sending multiple messages
+- Chat auto-syncs from story history after each GM response (shows combat compression immediately)
 - Auto-scrolls to latest message
 
 ## Tech Stack
@@ -96,4 +103,4 @@ src/
 - **Responsive design** for desktop and mobile
 - **Loading states** with playful messages
 - **Tool call visibility** shows what the GM is doing
-- **Session persistence** via player's current_session_id
+- **Story persistence** via player's story_messages JSON array

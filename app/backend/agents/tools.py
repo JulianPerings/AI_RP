@@ -2,14 +2,16 @@ from typing import Optional, List
 from langchain_core.tools import tool
 from sqlalchemy.orm import Session
 
+from datetime import datetime
 from database import SessionLocal
 from models import (
     PlayerCharacter, NonPlayerCharacter, Location, Quest,
     ItemTemplate, ItemInstance, Race, Faction,
     CharacterRelationship, CharacterType, OwnerType,
     Region, ClimateType, WealthLevel, DangerLevel,
-    RaceRelationship
+    RaceRelationship, CombatSession
 )
+from agents.story_manager import get_story_manager
 
 
 def get_db():
@@ -422,6 +424,23 @@ def update_player_health(player_id: int, health_change: int) -> dict:
         
         new_health = max(0, min(player.max_health, player.health + health_change))
         player.health = new_health
+
+        combat = db.query(CombatSession).filter(
+            CombatSession.player_id == player_id,
+            CombatSession.status == "active"
+        ).first()
+        if combat:
+            updated = False
+            team_player = list(combat.team_player or [])
+            for m in team_player:
+                if m.get("type") == "PC" and m.get("id") == player_id:
+                    m["hp"] = new_health
+                    m["max_hp"] = player.max_health
+                    updated = True
+                    break
+            if updated:
+                combat.team_player = team_player
+
         db.commit()
         
         return {
@@ -550,6 +569,32 @@ def update_npc_health(npc_id: int, health_change: int) -> dict:
         
         new_health = max(0, min(npc.max_health, npc.health + health_change))
         npc.health = new_health
+
+        # Keep any active combat trackers in sync (NPCs can be allies or enemies)
+        combats = db.query(CombatSession).filter(CombatSession.status == "active").all()
+        for combat in combats:
+            updated = False
+
+            team_player = list(combat.team_player or [])
+            for m in team_player:
+                if m.get("type") == "NPC" and m.get("id") == npc_id:
+                    m["hp"] = new_health
+                    m["max_hp"] = npc.max_health
+                    updated = True
+                    break
+            if updated:
+                combat.team_player = team_player
+
+            team_enemy = list(combat.team_enemy or [])
+            for m in team_enemy:
+                if m.get("type") == "NPC" and m.get("id") == npc_id:
+                    m["hp"] = new_health
+                    m["max_hp"] = npc.max_health
+                    updated = True
+                    break
+            if updated:
+                combat.team_enemy = team_enemy
+        
         db.commit()
         
         return {
@@ -909,6 +954,56 @@ def transfer_item(item_instance_id: int, new_owner_type: str,
             "item": item_name,
             "from": old_owner,
             "to": f"{owner_type.value}:{new_owner_id}" if new_owner_id else "ground"
+        }
+    finally:
+        db.close()
+
+
+@tool
+def consume_item_instance(item_instance_id: int, amount: int = 1) -> dict:
+    """Consume an item stack by decreasing its quantity.
+
+    Use this for ammo and consumables (arrows, potions, bandages, rations, etc.).
+    This mutates the existing ItemInstance quantity and deletes the instance when it reaches 0.
+
+    IMPORTANT:
+    - You need an `instance_id` from get_player_inventory / get_npc_inventory / get_items_at_location.
+    - This is for consumption, not transfer. Use transfer_item to move ownership.
+    """
+    db = SessionLocal()
+    try:
+        if item_instance_id <= 0:
+            return {"error": "item_instance_id must be a positive integer"}
+        if amount <= 0:
+            return {"error": "amount must be a positive integer"}
+
+        item = db.query(ItemInstance).filter(ItemInstance.id == item_instance_id).first()
+        if not item:
+            return {"error": f"Item instance with id {item_instance_id} not found"}
+
+        template = db.query(ItemTemplate).filter(ItemTemplate.id == item.template_id).first()
+        item_name = item.custom_name or (template.name if template else "Unknown")
+
+        if item.quantity is None:
+            item.quantity = 1
+
+        consumed = min(int(amount), int(item.quantity))
+        item.quantity = int(item.quantity) - consumed
+
+        deleted = False
+        if item.quantity <= 0:
+            db.delete(item)
+            deleted = True
+
+        db.commit()
+
+        return {
+            "consumed": True,
+            "item": item_name,
+            "instance_id": item_instance_id,
+            "amount": consumed,
+            "quantity_remaining": 0 if deleted else item.quantity,
+            "deleted": deleted
         }
     finally:
         db.close()
@@ -1590,6 +1685,455 @@ def update_race_relationship(source_race_id: int, target_race_id: int,
         db.close()
 
 
+# ============= Combat Tools =============
+
+@tool
+def initiate_combat(player_id: int, description: str,
+                    player_team_ids: Optional[List[int]] = None,
+                    enemy_team_ids: Optional[List[int]] = None) -> dict:
+    """Start a combat encounter between two teams.
+
+    Parameter meaning is intentionally explicit:
+
+    - `player_id`: The *owner player* whose combat session is being created/tracked.
+      (We key active combats by player_id, so all combat tools take it.)
+    - `player_team_ids`: Optional list of ALLY NPC ids on the player's side.
+      The owning player character is implied by `player_id` and is automatically included.
+    - `enemy_team_ids`: Required list of ENEMY NPC ids.
+
+    Returns:
+        Combat session info with full team stats.
+
+    Example:
+        initiate_combat(
+            player_id=1,
+            description="Goblin ambush",
+            player_team_ids=[5],
+            enemy_team_ids=[10, 11],
+        )
+    """
+    db = SessionLocal()
+    try:
+        if player_id <= 0:
+            return {"error": "player_id must be a positive integer"}
+
+        if player_team_ids is None:
+            player_team_ids = []
+        if enemy_team_ids is None:
+            enemy_team_ids = []
+
+        if not isinstance(player_team_ids, list) or not isinstance(enemy_team_ids, list):
+            return {"error": "player_team_ids and enemy_team_ids must be lists of integers"}
+
+        player = db.query(PlayerCharacter).filter(PlayerCharacter.id == player_id).first()
+        if not player:
+            return {"error": f"Player with id {player_id} not found"}
+
+        if len(enemy_team_ids) == 0:
+            nearby = []
+            if player.current_location_id:
+                npcs = db.query(NonPlayerCharacter).filter(
+                    NonPlayerCharacter.location_id == player.current_location_id
+                ).all()
+                nearby = [{"id": n.id, "name": n.name, "type": n.npc_type} for n in npcs]
+            return {
+                "error": "enemy_team_ids is required and must contain at least one NPC id",
+                "example": {
+                    "player_id": player_id,
+                    "description": description,
+                    "player_team_ids": player_team_ids,
+                    "enemy_team_ids": [npc["id"] for npc in nearby[:3]] if nearby else [0]
+                },
+                "nearby_npcs": nearby
+            }
+
+        # Check for existing active combat
+        existing = db.query(CombatSession).filter(
+            CombatSession.player_id == player_id,
+            CombatSession.status == "active"
+        ).first()
+        if existing:
+            return {
+                "error": "ALREADY IN COMBAT! Do NOT call initiate_combat again.",
+                "hint": "Combat is already active. Just narrate the fight and use update_combat_hp to track damage. Call end_combat when the fight concludes.",
+                "combat_id": existing.id,
+                "description": existing.description,
+                "player_team": existing.team_player,
+                "enemy_team": existing.team_enemy
+            }
+        
+        # Build player team with full stats (PC implied by player_id)
+        team_player = [{
+            "type": "PC", "id": player.id, "name": player.name,
+            "hp": player.health, "max_hp": player.max_health,
+            "role": "player"
+        }]
+
+        for npc_id in player_team_ids:
+            if not isinstance(npc_id, int) or npc_id <= 0:
+                continue
+            npc = db.query(NonPlayerCharacter).filter(NonPlayerCharacter.id == npc_id).first()
+            if npc:
+                team_player.append({
+                    "type": "NPC", "id": npc.id, "name": npc.name,
+                    "hp": npc.health, "max_hp": npc.max_health,
+                    "role": "ally"
+                })
+        
+        # Build enemy team with full stats
+        team_enemy = []
+        for npc_id in enemy_team_ids:
+            if not isinstance(npc_id, int) or npc_id <= 0:
+                continue
+            npc = db.query(NonPlayerCharacter).filter(NonPlayerCharacter.id == npc_id).first()
+            if npc:
+                team_enemy.append({
+                    "type": "NPC", "id": npc.id, "name": npc.name,
+                    "hp": npc.health, "max_hp": npc.max_health,
+                    "role": "enemy"
+                })
+        
+        if not team_enemy:
+            return {"error": "No valid combatants on enemy team"}
+        
+        # Create combat session
+        combat = CombatSession(
+            player_id=player_id,
+            status="active",
+            description=description,
+            team_player=team_player,
+            team_enemy=team_enemy
+        )
+        db.add(combat)
+        db.commit()
+        db.refresh(combat)
+        
+        return {
+            "combat_started": True,
+            "combat_id": combat.id,
+            "description": description,
+            "player_team": team_player,
+            "enemy_team": team_enemy,
+            "message": "Combat initiated! Track damage with update_player_health/update_npc_health. Use add_combatant/remove_combatant to modify teams. End with end_combat."
+        }
+    finally:
+        db.close()
+
+
+@tool
+def get_active_combat(player_id: int) -> dict:
+    """Get the current active combat for a player, if any.
+
+    Args:
+        player_id: The *owner player* whose combat session should be checked.
+
+    Returns:
+        Combat state with both teams and their current HP.
+    """
+    db = SessionLocal()
+    try:
+        if player_id <= 0:
+            return {"error": "player_id must be a positive integer"}
+
+        combat = db.query(CombatSession).filter(
+            CombatSession.player_id == player_id,
+            CombatSession.status == "active"
+        ).first()
+        
+        if not combat:
+            return {"in_combat": False}
+        
+        return {
+            "in_combat": True,
+            "combat_id": combat.id,
+            "description": combat.description,
+            "player_team": combat.team_player,
+            "enemy_team": combat.team_enemy
+        }
+    finally:
+        db.close()
+
+
+@tool
+def add_combatant(player_id: int, char_type: str, char_id: int, team: str) -> dict:
+    """Add a combatant to an active combat.
+
+    Args:
+        player_id: The *owner player* whose active combat session is being modified.
+        char_type: The combatant type: "PC" or "NPC".
+        char_id: The ID of that character. If `char_type` is "PC", this is `PlayerCharacter.id`.
+                If `char_type` is "NPC", this is `NonPlayerCharacter.id`.
+        team: Which side to join: "player" (allies) or "enemy".
+
+    Example:
+        add_combatant(player_id=1, char_type="NPC", char_id=15, team="enemy")
+    """
+    db = SessionLocal()
+    try:
+        if player_id <= 0:
+            return {"error": "player_id must be a positive integer"}
+        if team not in ("player", "enemy"):
+            return {"error": "team must be 'player' or 'enemy'"}
+        if char_type not in ("PC", "NPC"):
+            return {"error": "char_type must be 'PC' or 'NPC'"}
+        if char_id <= 0:
+            return {"error": "char_id must be a positive integer"}
+
+        combat = db.query(CombatSession).filter(
+            CombatSession.player_id == player_id,
+            CombatSession.status == "active"
+        ).first()
+        
+        if not combat:
+            return {"error": "No active combat"}
+        
+        # Check if already in combat
+        if combat.get_combatant(char_type, char_id):
+            return {"error": f"{char_type} {char_id} is already in combat"}
+        
+        # Get character stats
+        member = None
+        if char_type == "PC":
+            pc = db.query(PlayerCharacter).filter(PlayerCharacter.id == char_id).first()
+            if pc:
+                member = {"type": "PC", "id": pc.id, "name": pc.name,
+                         "hp": pc.health, "max_hp": pc.max_health, "role": "player" if team == "player" else "enemy"}
+        elif char_type == "NPC":
+            npc = db.query(NonPlayerCharacter).filter(NonPlayerCharacter.id == char_id).first()
+            if npc:
+                member = {"type": "NPC", "id": npc.id, "name": npc.name,
+                         "hp": npc.health, "max_hp": npc.max_health, "role": "ally" if team == "player" else "enemy"}
+        
+        if not member:
+            return {"error": f"{char_type} {char_id} not found"}
+        
+        # Add to appropriate team
+        if team == "player":
+            team_list = list(combat.team_player or [])
+            team_list.append(member)
+            combat.team_player = team_list
+        else:
+            team_list = list(combat.team_enemy or [])
+            team_list.append(member)
+            combat.team_enemy = team_list
+        
+        db.commit()
+        
+        return {
+            "added": True,
+            "name": member["name"],
+            "team": team,
+            "combat_id": combat.id
+        }
+    finally:
+        db.close()
+
+
+@tool
+def remove_combatant(player_id: int, char_type: str, char_id: int, reason: str = "fled") -> dict:
+    """Remove a combatant from active combat (fled, captured, etc).
+
+    Args:
+        player_id: The *owner player* whose active combat session is being modified.
+        char_type: "PC" or "NPC".
+        char_id: The ID of the character to remove (PC id or NPC id depending on char_type).
+        reason: Why they left ("fled", "captured", "retreated", "died").
+    """
+    db = SessionLocal()
+    try:
+        if player_id <= 0:
+            return {"error": "player_id must be a positive integer"}
+        if char_type not in ("PC", "NPC"):
+            return {"error": "char_type must be 'PC' or 'NPC'"}
+        if char_id <= 0:
+            return {"error": "char_id must be a positive integer"}
+
+        combat = db.query(CombatSession).filter(
+            CombatSession.player_id == player_id,
+            CombatSession.status == "active"
+        ).first()
+        
+        if not combat:
+            return {"error": "No active combat"}
+        
+        # Find and remove from player team
+        removed_name = None
+        team_player = list(combat.team_player or [])
+        for i, m in enumerate(team_player):
+            if m.get("type") == char_type and m.get("id") == char_id:
+                removed_name = m.get("name")
+                team_player.pop(i)
+                combat.team_player = team_player
+                break
+        
+        # Find and remove from enemy team
+        if not removed_name:
+            team_enemy = list(combat.team_enemy or [])
+            for i, m in enumerate(team_enemy):
+                if m.get("type") == char_type and m.get("id") == char_id:
+                    removed_name = m.get("name")
+                    team_enemy.pop(i)
+                    combat.team_enemy = team_enemy
+                    break
+        
+        if not removed_name:
+            return {"error": f"{char_type} {char_id} not found in combat"}
+        
+        db.commit()
+        
+        return {
+            "removed": True,
+            "name": removed_name,
+            "reason": reason,
+            "combat_id": combat.id
+        }
+    finally:
+        db.close()
+
+
+@tool
+def update_combat_hp(player_id: int, char_type: str, char_id: int, new_hp: int) -> dict:
+    """Update a combatant's HP in the combat tracker (keeps combat state in sync).
+
+    Why both `player_id` and `char_id`?
+    - `player_id` identifies *which active combat session* to modify.
+      (Combats are tracked per-player.)
+    - (`char_type`, `char_id`) identifies *which combatant* inside that combat.
+
+    This updates BOTH the database character record AND the combat tracker.
+
+    Args:
+        player_id: The *owner player* whose active combat session is being updated.
+        char_type: "PC" or "NPC".
+        char_id: The ID of the combatant (PC id or NPC id depending on char_type).
+        new_hp: New HP value (will be clamped to >= 0).
+    """
+    db = SessionLocal()
+    try:
+        if player_id <= 0:
+            return {"error": "player_id must be a positive integer"}
+        if char_type not in ("PC", "NPC"):
+            return {"error": "char_type must be 'PC' or 'NPC'"}
+        if char_id <= 0:
+            return {"error": "char_id must be a positive integer"}
+
+        combat = db.query(CombatSession).filter(
+            CombatSession.player_id == player_id,
+            CombatSession.status == "active"
+        ).first()
+        
+        if not combat:
+            return {"error": "No active combat"}
+        
+        # Update actual character
+        if char_type == "PC":
+            char = db.query(PlayerCharacter).filter(PlayerCharacter.id == char_id).first()
+            if char:
+                char.health = max(0, new_hp)
+        elif char_type == "NPC":
+            char = db.query(NonPlayerCharacter).filter(NonPlayerCharacter.id == char_id).first()
+            if char:
+                char.health = max(0, new_hp)
+        
+        # Update combat tracker
+        updated_name = None
+        team_player = list(combat.team_player or [])
+        for m in team_player:
+            if m.get("type") == char_type and m.get("id") == char_id:
+                m["hp"] = max(0, new_hp)
+                updated_name = m.get("name")
+                combat.team_player = team_player
+                break
+        
+        if not updated_name:
+            team_enemy = list(combat.team_enemy or [])
+            for m in team_enemy:
+                if m.get("type") == char_type and m.get("id") == char_id:
+                    m["hp"] = max(0, new_hp)
+                    updated_name = m.get("name")
+                    combat.team_enemy = team_enemy
+                    break
+        
+        if not updated_name:
+            return {"error": f"{char_type} {char_id} not found in combat"}
+        
+        db.commit()
+        
+        status = "DOWN" if new_hp <= 0 else "standing"
+        return {
+            "updated": True,
+            "name": updated_name,
+            "new_hp": max(0, new_hp),
+            "status": status
+        }
+    finally:
+        db.close()
+
+
+@tool
+def end_combat(player_id: int, outcome: str, summary: str) -> dict:
+    """End an active combat encounter.
+
+    Args:
+        player_id: The *owner player* whose active combat session is being ended.
+        outcome: Result of combat ("victory", "defeat", "fled", "negotiated", "interrupted").
+        summary: A cinematic, in-world narrative summary that blends into the story.
+            Write it as a tight story beat (prefer ~4-8 sentences) that clearly conveys
+            the turning point, decisive moment, and immediate aftermath, ending with a
+            small forward hook. No meta headers like "COMBAT SUMMARY" and no bullet-point
+            recaps. This summary will replace the individual combat messages in the story log.
+
+    Returns:
+        Final combat state and confirmation.
+    """
+    db = SessionLocal()
+    try:
+        if player_id <= 0:
+            return {"error": "player_id must be a positive integer"}
+
+        combat = db.query(CombatSession).filter(
+            CombatSession.player_id == player_id,
+            CombatSession.status == "active"
+        ).first()
+        
+        if not combat:
+            return {"error": "No active combat to end"}
+        
+        combat_id = combat.id
+        combat.status = "ended"
+        combat.outcome = outcome
+        combat.summary = summary
+        combat.ended_at = datetime.utcnow()
+        
+        db.commit()
+        
+        # Compress combat messages into a single summary
+        story_manager = get_story_manager()
+        combat_tag = f"combat:{combat_id}"
+        
+        # Store only narrative text so it reads like part of the story
+        compressed_summary = summary
+        
+        messages_compressed = story_manager.compress_tagged_messages(
+            player_id=player_id,
+            tag=combat_tag,
+            summary=compressed_summary,
+            summary_tags=[f"combat:{combat_id}:summary", "combat_summary", f"combat_outcome:{outcome}"]
+        )
+        
+        return {
+            "combat_ended": True,
+            "combat_id": combat_id,
+            "outcome": outcome,
+            "summary": summary,
+            "final_player_team": combat.team_player,
+            "final_enemy_team": combat.team_enemy,
+            "messages_compressed": messages_compressed
+        }
+    finally:
+        db.close()
+
+
 def get_game_tools():
     """Return all tools available to the Game Master agent."""
     return [
@@ -1617,6 +2161,7 @@ def get_game_tools():
         pickup_item,
         drop_item,
         transfer_item,
+        consume_item_instance,
         # Item creation (creates NEW items - use sparingly for rewards/loot)
         create_item_for_player,
         create_item_for_npc,
@@ -1650,5 +2195,12 @@ def get_game_tools():
         list_races,
         get_race_relationships,
         create_race,
-        update_race_relationship
+        update_race_relationship,
+        # Combat management
+        initiate_combat,
+        get_active_combat,
+        add_combatant,
+        remove_combatant,
+        update_combat_hp,
+        end_combat
     ]

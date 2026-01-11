@@ -6,6 +6,7 @@
 - `game.py` - **Game Master AI endpoints** - LangGraph-powered narrative agent
   - `POST /game/start-session` - Begin new game session with intro narrative
   - `POST /game/chat` - Send player action, receive AI-generated narrative response
+  - `GET /game/combat/{player_id}` - Get active combat state (teams + HP) for frontend HUD
   - `GET /game/health` - Check Game Master agent status
 
 ## Core Entity Routes

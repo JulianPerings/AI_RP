@@ -3,31 +3,16 @@ from sqlalchemy.orm import Session
 from typing import List
 from database import get_db
 from models.player_character import PlayerCharacter
-from models.chat_history import ChatSession
 from schemas.player_character import PlayerCharacterCreate, PlayerCharacterResponse
-from agents.chat_history_manager import ChatHistoryManager
 
 router = APIRouter(prefix="/player-characters", tags=["player_characters"])
 
 @router.post("/", response_model=PlayerCharacterResponse)
 def create_player_character(character: PlayerCharacterCreate, db: Session = Depends(get_db)):
-    # Create the player character
+    # Create the player character with empty story
     db_character = PlayerCharacter(**character.model_dump())
+    db_character.story_messages = []  # Initialize empty story
     db.add(db_character)
-    db.commit()
-    db.refresh(db_character)
-    
-    # Auto-create first session with new ID format: {player_id}-0
-    session_id = ChatHistoryManager.make_session_id(db_character.id, 0)
-    chat_session = ChatSession(
-        session_id=session_id,
-        player_id=db_character.id,
-        session_number=0
-    )
-    db.add(chat_session)
-    
-    # Update player with their current session
-    db_character.current_session_id = session_id
     db.commit()
     db.refresh(db_character)
     

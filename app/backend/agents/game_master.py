@@ -10,8 +10,8 @@ from langgraph.checkpoint.memory import MemorySaver
 from config import settings
 from .state import GameState
 from .tools import get_game_tools
-from .chat_history_manager import get_history_manager
-from .prompts import GAME_MASTER_SYSTEM_PROMPT, format_session_start, format_archive_summary
+from .story_manager import get_story_manager
+from .prompts import GAME_MASTER_SYSTEM_PROMPT, format_session_start
 from .context_builder import format_context_for_prompt
 
 logger = logging.getLogger(__name__)
@@ -145,57 +145,42 @@ class GameMasterAgent:
         
         return workflow.compile(checkpointer=self.memory)
     
-    def chat(self, message: str, player_id: int, session_id: str, 
-             session_context: Optional[dict] = None,
-             save_human_message: bool = True) -> tuple[str, List[dict]]:
+    def chat(self, message: str, player_id: int,
+             session_context: Optional[dict] = None) -> tuple[str, List[dict]]:
         """Send a message to the Game Master and get a response.
-        
-        Args:
-            save_human_message: If False, don't save the human message to history.
-                               Used for internal prompts like session start.
         
         Returns:
             Tuple of (response_text, tool_calls_made)
         """
-        # Use unique thread_id per invocation since we manage history in our database
-        # This prevents LangGraph's MemorySaver from accumulating old tool calls
+        # Use unique thread_id per invocation to prevent tool call accumulation
         config = {
-            "configurable": {"thread_id": f"{session_id}-{uuid.uuid4().hex[:8]}"},
-            "recursion_limit": 50  # Allow more tool calls for complex session starts
+            "configurable": {"thread_id": f"{player_id}-{uuid.uuid4().hex[:8]}"},
+            "recursion_limit": 50
         }
-        history_manager = get_history_manager()
         
-        # Ensure session exists in database
-        history_manager.get_or_create_session(session_id, player_id)
+        story_manager = get_story_manager()
         
-        # Save incoming human message (skip for internal prompts)
-        if save_human_message:
-            history_manager.save_human_message(session_id, message)
+        # Load recent story messages for context
+        recent_messages = story_manager.get_context_messages(player_id, limit=20)
         
-        # Check if we need to archive old messages
-        history_manager.check_and_archive_if_needed(
-            player_id, session_id, 
-            summarize_callback=self._generate_summary
-        )
-        
-        # Load recent history for context
-        history_messages = history_manager.get_langchain_messages(
-            session_id, limit=settings.MIN_MESSAGES_IN_SESSION
-        )
-        
-        # Load previous session summaries for long-term memory
-        previous_summaries = history_manager.get_previous_summaries(player_id)
+        # Convert to LangChain messages
+        history_messages = []
+        for msg in recent_messages:
+            if msg["role"] == "player":
+                history_messages.append(HumanMessage(content=msg["content"]))
+            elif msg["role"] == "gm":
+                history_messages.append(AIMessage(content=msg["content"]))
         
         # Build initial state with history context
         initial_state = {
-            "messages": history_messages[:-1] + [HumanMessage(content=message)] if len(history_messages) > 1 else [HumanMessage(content=message)],
+            "messages": history_messages + [HumanMessage(content=message)],
             "player_id": player_id,
             "current_location_id": session_context.get("location_id") if session_context else None,
             "session_context": session_context or {},
-            "previous_summaries": previous_summaries
+            "previous_summaries": []  # TODO: Implement new memory system
         }
         
-        logger.info(f"[CHAT] Session {session_id} | Player {player_id} | History: {len(history_messages)} msgs | Summaries: {len(previous_summaries)} | Message: {message[:100]}...")
+        logger.info(f"[CHAT] Player {player_id} | History: {len(history_messages)} msgs | Message: {message[:100]}...")
         
         # Track how many messages we started with
         initial_message_count = len(initial_state["messages"])
@@ -213,14 +198,11 @@ class GameMasterAgent:
         final_message = result["messages"][-1]
         response_text = final_message.content if isinstance(final_message, AIMessage) else str(final_message)
         
-        # Save AI response to database
-        history_manager.save_ai_message(session_id, response_text, tool_calls_made if tool_calls_made else None)
-        
         logger.info(f"[RESPONSE] {len(tool_calls_made)} tool calls | Response length: {len(response_text)}")
         
         return response_text, tool_calls_made
     
-    def start_session(self, player_id: int, session_id: str, 
+    def start_session(self, player_id: int,
                        session_context: Optional[dict] = None) -> tuple[str, List[dict]]:
         """Start a new game session with an introductory message.
         
@@ -230,10 +212,7 @@ class GameMasterAgent:
             Tuple of (response_text, tool_calls_made)
         """
         intro_prompt = format_session_start(player_id)
-        
-        # Don't save the internal session start prompt to chat history
-        return self.chat(intro_prompt, player_id, session_id, session_context, 
-                        save_human_message=False)
+        return self.chat(intro_prompt, player_id, session_context)
 
 
 _game_master_instance: Optional[GameMasterAgent] = None

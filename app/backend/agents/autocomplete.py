@@ -11,7 +11,7 @@ from langchain_core.messages import HumanMessage
 
 from config import settings
 from .tools import get_player_info, get_location_info, get_npc_info, list_races
-from .chat_history_manager import get_history_manager
+from .story_manager import get_story_manager
 from .prompts import AUTOCOMPLETE_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,6 @@ AUTOCOMPLETE_TOOLS = [
 
 def autocomplete_action(
     player_id: int,
-    session_id: str,
     user_input: str = "",
     session_context: Optional[dict] = None
 ) -> str:
@@ -37,7 +36,6 @@ def autocomplete_action(
     
     Args:
         player_id: The player's ID
-        session_id: Current session ID for history lookup
         user_input: Rough idea from player (can be empty)
         session_context: Pre-built session context from context_builder
     
@@ -99,13 +97,13 @@ def autocomplete_action(
     
     context_str = "\n".join(context_parts) if context_parts else "No context available"
     
-    # Get last 5 messages from history
-    history_manager = get_history_manager()
-    history = history_manager.get_history(session_id, limit=10)
+    # Get last 5 messages from story
+    story_manager = get_story_manager()
+    messages = story_manager.get_messages(player_id, limit=10)
     
     recent_messages = []
-    for msg in history[-5:]:  # Last 5 messages
-        role = "GM" if msg.get("role") == "ai" else "Player"
+    for msg in messages[-5:]:  # Last 5 messages
+        role = "GM" if msg.get("role") == "gm" else "Player"
         content = msg.get("content", "")[:300]  # Truncate long messages
         recent_messages.append(f"**{role}**: {content}")
     

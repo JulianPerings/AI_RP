@@ -3,7 +3,7 @@
 **Purpose**: SQLAlchemy ORM models defining database schema for the AI RPG.
 
 ## Core Entity Models
-- `player_character.py` - PlayerCharacter (name, class, level, health, gold, **luck**, race, faction, reputation, **current_session_id**)
+- `player_character.py` - PlayerCharacter (name, class, level, health, gold, **luck**, race, faction, reputation, **story_messages**)
 - `non_player_character.py` - NonPlayerCharacter (name, type, health, behavior_state, base_disposition, race, faction, personality_traits, **following_player_id**)
 - `item_template.py` - **ItemTemplate** - Item blueprints (name, category, rarity, weight, properties, requirements)
 - `item_instance.py` - **ItemInstance** - Actual items in world (template_id, owner, location, equipped, quantity, durability, enchantments)
@@ -18,10 +18,25 @@
 - `faction_relationship.py` - FactionRelationship - Faction dynamics (allied, enemy, neutral)
 - `character_relationship.py` - **CharacterRelationship** - Unified relationship system for ALL character interactions (PC↔NPC, NPC↔NPC) using polymorphic character types
 
-## Chat History Models
-- `chat_history.py` - **ChatSession** and **ChatMessage** - Persistent conversation storage
-  - `ChatSession`: Links sessions to players (session_id, player_id, timestamps)
-  - `ChatMessage`: Individual messages (role, content, tool_calls, tool_name)
+## Story System (Simplified)
+Stories are now stored directly in `PlayerCharacter.story_messages` as a JSON list:
+```json
+[{"role": "gm"|"player", "content": "...", "tags": [...], "timestamp": "..."}]
+```
+- No separate tables needed
+- Tags support: `dice:15`, `critical`, `fumble`, `combat`, etc.
+- Easy to query last N messages for GM context
+
+**Note**: Old `chat_history.py` models (ChatSession, ChatMessage) are deprecated.
+
+## Combat System
+- `combat_session.py` - **CombatSession** - Tracks team-based combat encounters
+  - `player_id`: Player in combat
+  - `status`: active, ended, fled
+  - `team_player`: JSON array of player's team with HP stats
+  - `team_enemy`: JSON array of enemy team with HP stats
+  - `outcome`: victory, defeat, fled, negotiated, interrupted
+  - `summary`: LLM-generated narrative summary when combat ends
 
 ## Behavior States (NPC)
 - `PASSIVE` - Won't initiate combat
