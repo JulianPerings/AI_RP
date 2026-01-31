@@ -2,13 +2,29 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { getPlayers } from '../api'
 
+const LLM_PROVIDERS = ['openai', 'xai', 'gemini', 'kimi', 'claude']
+
+function getProviderLabel(provider) {
+  if (provider === 'xai') return 'Grok'
+  if (provider === 'openai') return 'OpenAI'
+  if (provider === 'gemini') return 'Gemini'
+  if (provider === 'kimi') return 'Kimi'
+  if (provider === 'claude') return 'Claude'
+  return provider
+}
+
 function PlayerList() {
   const [players, setPlayers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [llmProvider, setLlmProvider] = useState('openai')
   const navigate = useNavigate()
 
   useEffect(() => {
+    const stored = window.localStorage.getItem('llm_provider')
+    if (LLM_PROVIDERS.includes(stored)) {
+      setLlmProvider(stored)
+    }
     loadPlayers()
   }, [])
 
@@ -28,6 +44,13 @@ function PlayerList() {
     navigate(`/chat/${player.id}`)
   }
 
+  function cycleProvider() {
+    const idx = LLM_PROVIDERS.indexOf(llmProvider)
+    const next = LLM_PROVIDERS[(idx + 1) % LLM_PROVIDERS.length]
+    setLlmProvider(next)
+    window.localStorage.setItem('llm_provider', next)
+  }
+
   if (loading) {
     return (
       <div className="loading-container">
@@ -39,7 +62,17 @@ function PlayerList() {
 
   return (
     <div>
-      <header className="header">
+      <header className="header" style={{ position: 'relative' }}>
+        <div style={{ position: 'absolute', top: '0.5rem', right: 0 }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={cycleProvider}
+            style={{ padding: '0.45rem 0.85rem', fontSize: '0.85rem', whiteSpace: 'nowrap' }}
+          >
+            LLM: {getProviderLabel(llmProvider)}
+          </button>
+        </div>
         <h1>⚔️ AI Game Master ⚔️</h1>
         <p>Choose your adventurer or create a new hero</p>
       </header>

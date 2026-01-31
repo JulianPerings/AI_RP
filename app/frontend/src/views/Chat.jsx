@@ -18,6 +18,14 @@ function Chat() {
   const { playerId } = useParams()
   const [searchParams] = useSearchParams()
   const isNewCharacter = searchParams.get('new') === 'true'
+
+  function getLlmProvider() {
+    const stored = window.localStorage.getItem('llm_provider')
+    if (stored === 'openai' || stored === 'xai' || stored === 'gemini' || stored === 'kimi' || stored === 'claude') {
+      return stored
+    }
+    return null
+  }
   
   const [player, setPlayer] = useState(null)
   const [messages, setMessages] = useState([])
@@ -123,7 +131,7 @@ function Chat() {
       
       if (isNewCharacter || !story.messages || story.messages.length === 0) {
         // New character or no story - start a fresh session
-        const session = await startSession(parseInt(playerId))
+        const session = await startSession(parseInt(playerId), getLlmProvider())
         setMessages([{
           role: 'gm',
           content: session.intro,
@@ -159,7 +167,8 @@ function Chat() {
     try {
       const result = await autocompleteAction(
         parseInt(playerId),
-        input.trim()
+        input.trim(),
+        getLlmProvider()
       )
       console.log('Autocomplete result:', result)
       if (result && result.suggestion) {
@@ -249,7 +258,8 @@ function Chat() {
       const response = await sendMessage(
         parseInt(playerId),
         userMessage,
-        tags
+        tags,
+        getLlmProvider()
       )
 
       const gmToolCalls = response.tool_calls || []

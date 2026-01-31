@@ -7,6 +7,11 @@ class Settings(BaseSettings):
     
     # LLM Configuration (gpt-5-mini: 400k context, 128k max output, reasoning support)
     OPENAI_MODEL: str = "gpt-5-mini"
+    XAI_API_KEY: str = ""
+    XAI_BASE_URL: str = "https://api.x.ai/v1"
+    XAI_MODEL: str = "grok-4-1-fast-reasoning"
+    DEFAULT_LLM_PROVIDER: str = "openai"
+
     LLM_TEMPERATURE: float = 0.8            # Creativity (0.0-2.0), higher = more creative
     LLM_MAX_TOKENS: int = 8192              # Max response tokens (model supports up to 128k)
     LLM_REASONING_EFFORT: str = "low"       # Reasoning depth: "low", "medium", "high"

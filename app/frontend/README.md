@@ -9,6 +9,7 @@ React-based frontend for the AI Game Master RPG.
 - Shows stats: level, health, gold, XP
 - Click any player to go to their chat session
 - Link to create new character
+- LLM Provider selector (OpenAI / Grok) that is persisted and used for game requests
 
 ### 2. Create Character (`/create`)
 - Form to create new player character
@@ -81,6 +82,23 @@ Frontend available at: http://localhost:5173
 Vite proxies `/api/*` requests to the backend:
 - `/api/player-characters/` → `http://backend:8000/player-characters/`
 - `/api/game/chat` → `http://backend:8000/game/chat`
+
+## LLM Provider Switching
+
+The frontend stores the selected provider in `localStorage` under `llm_provider`.
+
+On the home screen, the provider selector is a compact button that shows the current provider and cycles through the available options on click.
+
+- `openai` → uses OpenAI API settings
+- `xai` → uses Grok via OpenAI-compatible API
+- `gemini` → placeholder (not implemented)
+- `kimi` → placeholder (not implemented)
+- `claude` → placeholder (not implemented)
+
+This value is sent to the backend as `llm_provider` on:
+- `POST /api/game/start-session`
+- `POST /api/game/chat`
+- `POST /api/game/autocomplete`
 
 ## File Structure
 

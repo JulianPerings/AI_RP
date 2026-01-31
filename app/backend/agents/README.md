@@ -60,6 +60,8 @@ The `GameMasterAgent` is a stateful LangGraph agent that:
 - Manages game state (health, gold, inventory, quests)
 - Creates drama through challenges and moral dilemmas
 
+Tool call/result tracing is logged at `DEBUG` level to reduce noise during normal gameplay. Tool results are normalized to safe non-empty string content before being passed back into the LLM.
+
 ### Storytelling Guidelines
 The GM follows strict narrative rules:
 - **No inventory dumps** - Don't list items unless player asks

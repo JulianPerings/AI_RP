@@ -22,24 +22,25 @@ export async function createPlayer(data) {
   return res.json();
 }
 
-export async function startSession(playerId) {
+export async function startSession(playerId, llmProvider = null) {
   const res = await fetch(`${API_BASE}/game/start-session`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ player_id: playerId })
+    body: JSON.stringify({ player_id: playerId, llm_provider: llmProvider })
   });
   if (!res.ok) throw new Error('Failed to start session');
   return res.json();
 }
 
-export async function sendMessage(playerId, message, tags = null) {
+export async function sendMessage(playerId, message, tags = null, llmProvider = null) {
   const res = await fetch(`${API_BASE}/game/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       player_id: playerId,
       message,
-      tags
+      tags,
+      llm_provider: llmProvider
     })
   });
   if (!res.ok) throw new Error('Failed to send message');
@@ -64,13 +65,14 @@ export async function getRaces() {
   return res.json();
 }
 
-export async function autocompleteAction(playerId, userInput = '') {
+export async function autocompleteAction(playerId, userInput = '', llmProvider = null) {
   const res = await fetch(`${API_BASE}/game/autocomplete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       player_id: playerId,
-      user_input: userInput
+      user_input: userInput,
+      llm_provider: llmProvider
     })
   });
   if (!res.ok) throw new Error('Failed to autocomplete');

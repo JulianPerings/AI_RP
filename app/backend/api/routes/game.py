@@ -19,6 +19,7 @@ class ChatRequest(BaseModel):
     message: str
     player_id: int
     tags: Optional[list] = None  # Optional tags for the message (e.g., dice roll)
+    llm_provider: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -28,6 +29,7 @@ class ChatResponse(BaseModel):
 
 class StartSessionRequest(BaseModel):
     player_id: int
+    llm_provider: Optional[str] = None
 
 
 class StartSessionResponse(BaseModel):
@@ -39,6 +41,7 @@ class StartSessionResponse(BaseModel):
 class AutocompleteRequest(BaseModel):
     player_id: int
     user_input: str = ""  # Can be empty for suggestion
+    llm_provider: Optional[str] = None
 
 
 class AutocompleteResponse(BaseModel):
@@ -99,7 +102,10 @@ def game_chat(request: ChatRequest, db: Session = Depends(get_db)):
     # Build rich session context with inventory, NPCs, items, quests
     session_context = build_session_context(db, request.player_id)
     
-    gm = create_game_master()
+    try:
+        gm = create_game_master(llm_provider=request.llm_provider)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     
     try:
         response, tool_calls = gm.chat(
@@ -154,7 +160,10 @@ def start_game_session(request: StartSessionRequest, db: Session = Depends(get_d
         raise HTTPException(status_code=404, detail=f"Player with id {request.player_id} not found")
     
     story_manager = get_story_manager()
-    gm = create_game_master()
+    try:
+        gm = create_game_master(llm_provider=request.llm_provider)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     
     # Build rich session context
     session_context = build_session_context(db, request.player_id)
@@ -197,9 +206,12 @@ def handle_autocomplete(request: AutocompleteRequest, db: Session = Depends(get_
         suggestion = autocomplete_action(
             player_id=request.player_id,
             user_input=request.user_input,
-            session_context=session_context
+            session_context=session_context,
+            llm_provider=request.llm_provider
         )
         return AutocompleteResponse(suggestion=suggestion)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception(f"Autocomplete error: {e}")
         raise HTTPException(status_code=500, detail=f"Autocomplete error: {str(e)}")

@@ -1,6 +1,7 @@
 import logging
 import uuid
-from typing import Optional, List
+import json
+from typing import Optional, List, Dict, Any
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from langgraph.graph import StateGraph, END
@@ -19,24 +20,85 @@ logger = logging.getLogger(__name__)
 
 class GameMasterAgent:
     """LangGraph-based Game Master agent for the RPG."""
+
+    def _normalize_message_content(self, msg: Any) -> None:
+        if not hasattr(msg, "content"):
+            return
+        content = getattr(msg, "content")
+
+        if isinstance(content, str):
+            if content.strip():
+                return
+            if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+                msg.content = "(tool call)"
+                return
+            msg.content = "(empty)"
+            return
+
+        if content is None:
+            msg.content = "(empty)"
+            return
+
+        try:
+            msg.content = json.dumps(content, ensure_ascii=False)
+        except TypeError:
+            msg.content = str(content)
+
+        if not (msg.content or "").strip():
+            msg.content = "(empty)"
     
-    def __init__(self, model_name: Optional[str] = None):
-        self.model_name = model_name or settings.OPENAI_MODEL
+    def __init__(self, model_name: Optional[str] = None, llm_provider: Optional[str] = None):
+        provider = (llm_provider or settings.DEFAULT_LLM_PROVIDER or "openai").lower()
+        if provider not in {"openai", "xai", "gemini", "kimi", "claude"}:
+            raise ValueError(f"Unsupported llm_provider: {provider}")
+
+        self.llm_provider = provider
+
+        api_key = (settings.OPENAI_API_KEY or "").strip()
+        base_url = None
+
+        if provider == "gemini":
+            raise ValueError("llm_provider 'gemini' is not implemented")
+        if provider == "kimi":
+            raise ValueError("llm_provider 'kimi' is not implemented")
+        if provider == "claude":
+            raise ValueError("llm_provider 'claude' is not implemented")
+
+        if provider == "xai":
+            api_key = (settings.XAI_API_KEY or "").strip()
+            if not api_key:
+                raise ValueError("XAI_API_KEY is required when llm_provider is 'xai'")
+            base_url = (settings.XAI_BASE_URL or "").strip() or None
+            self.model_name = (settings.XAI_MODEL or "").strip() or settings.OPENAI_MODEL
+        else:
+            self.model_name = (model_name or "").strip() or settings.OPENAI_MODEL
+
         self.tools = get_game_tools()
-        self.llm = ChatOpenAI(
-            model=self.model_name,
-            api_key=settings.OPENAI_API_KEY,
-            temperature=settings.LLM_TEMPERATURE,
-            max_tokens=settings.LLM_MAX_TOKENS,
-            reasoning_effort=settings.LLM_REASONING_EFFORT
-        ).bind_tools(self.tools)
+
+        llm_kwargs = {
+            "model": self.model_name,
+            "api_key": api_key,
+            "temperature": settings.LLM_TEMPERATURE,
+            "max_tokens": settings.LLM_MAX_TOKENS,
+        }
+        if provider == "openai":
+            llm_kwargs["reasoning_effort"] = settings.LLM_REASONING_EFFORT
+        if base_url:
+            llm_kwargs["base_url"] = base_url
+
+        self.llm = ChatOpenAI(**llm_kwargs).bind_tools(self.tools)
+
         # Separate LLM for summarization (no tools needed)
-        self.summary_llm = ChatOpenAI(
-            model=self.model_name,
-            api_key=settings.OPENAI_API_KEY,
-            temperature=settings.SUMMARY_LLM_TEMPERATURE,
-            max_tokens=settings.SUMMARY_LLM_MAX_TOKENS
-        )
+        summary_kwargs = {
+            "model": self.model_name,
+            "api_key": api_key,
+            "temperature": settings.SUMMARY_LLM_TEMPERATURE,
+            "max_tokens": settings.SUMMARY_LLM_MAX_TOKENS,
+        }
+        if base_url:
+            summary_kwargs["base_url"] = base_url
+
+        self.summary_llm = ChatOpenAI(**summary_kwargs)
         self.memory = MemorySaver()
         self.graph = self._build_graph()
     
@@ -82,6 +144,9 @@ class GameMasterAgent:
     def _call_model(self, state: GameState) -> dict:
         """Call the LLM with current state."""
         messages = state["messages"]
+
+        for m in messages:
+            self._normalize_message_content(m)
         
         system_content = GAME_MASTER_SYSTEM_PROMPT
         
@@ -115,6 +180,16 @@ class GameMasterAgent:
         """Wrapper to log tool results."""
         tool_node = ToolNode(self.tools)
         result = tool_node.invoke(state)
+
+        for msg in result.get("messages", []):
+            if isinstance(msg, ToolMessage):
+                if not isinstance(msg.content, str):
+                    try:
+                        msg.content = json.dumps(msg.content, ensure_ascii=False)
+                    except TypeError:
+                        msg.content = str(msg.content)
+                if not (msg.content or "").strip():
+                    msg.content = "(empty)"
         
         # Log tool results
         for msg in result.get("messages", []):
@@ -215,12 +290,13 @@ class GameMasterAgent:
         return self.chat(intro_prompt, player_id, session_context)
 
 
-_game_master_instance: Optional[GameMasterAgent] = None
+_game_master_instances: Dict[str, GameMasterAgent] = {}
 
 
-def create_game_master() -> GameMasterAgent:
-    """Create or return the singleton Game Master agent."""
-    global _game_master_instance
-    if _game_master_instance is None:
-        _game_master_instance = GameMasterAgent()
-    return _game_master_instance
+def create_game_master(llm_provider: Optional[str] = None) -> GameMasterAgent:
+    provider = (llm_provider or settings.DEFAULT_LLM_PROVIDER or "openai").lower()
+    if provider not in {"openai", "xai", "gemini", "kimi", "claude"}:
+        raise ValueError(f"Unsupported llm_provider: {provider}")
+    if provider not in _game_master_instances:
+        _game_master_instances[provider] = GameMasterAgent(llm_provider=provider)
+    return _game_master_instances[provider]

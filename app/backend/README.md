@@ -34,3 +34,27 @@ docker-compose exec backend python seed.py
 
 ## Tech Stack
 FastAPI, SQLAlchemy, PostgreSQL, OpenAI API, LangGraph, LangChain
+
+## LLM Provider
+
+The backend can route LLM calls to either OpenAI or xAI (Grok) via OpenAI-compatible API.
+
+- Default provider is configured via `DEFAULT_LLM_PROVIDER`.
+- Requests may override provider by including `llm_provider` (`openai` or `xai`) on:
+  - `POST /game/start-session`
+  - `POST /game/chat`
+  - `POST /game/autocomplete`
+
+When using `llm_provider="xai"`, `XAI_API_KEY` must be set.
+
+The following providers are recognized as placeholders but are not implemented yet:
+- `gemini`
+- `kimi`
+- `claude`
+
+## Logging
+
+By default, the backend reduces log noise by setting these loggers to `WARNING` in `main.py`:
+- `uvicorn.access`
+- `httpx`
+- `httpcore`

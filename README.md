@@ -24,10 +24,16 @@ app/
 
 ## Quick Start with Docker
 
-1. **Set your OpenAI API key in `.env`:**
+1. **Set your API keys in `.env`:**
 ```bash
 OPENAI_API_KEY=your_actual_key_here
+XAI_API_KEY=your_actual_xai_key_here
+XAI_BASE_URL=https://api.x.ai/v1
+XAI_MODEL=grok-4-1-fast-reasoning
 ```
+
+`docker-compose.yml` loads the repo-root `.env` file into the backend container.
+Make sure `XAI_API_KEY` has no leading/trailing whitespace.
 
 2. **Start the application:**
 ```bash
@@ -124,7 +130,8 @@ uvicorn main:app --reload
 
 - **Frontend**: React 18, React Router, Vite
 - **Backend**: FastAPI, SQLAlchemy, PostgreSQL
-- **AI Agent**: LangGraph, LangChain, OpenAI API (gpt-5-mini)
+- **AI Agent**: LangGraph, LangChain, OpenAI API (gpt-5-mini), xAI (Grok) via OpenAI-compatible API
+- **Provider selection**: Rotary provider switch in the UI (OpenAI, Grok, Gemini placeholder, Kimi placeholder, Claude placeholder)
 - **Containerization**: Docker, Docker Compose
 
 ## Recent Updates
