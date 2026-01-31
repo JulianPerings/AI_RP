@@ -1,3 +1,6 @@
+---
+auto_execution_mode: 3
+---
 # 5-Agenten-Workflow für Problemlösung
  
 Bei jeder Aufgabenstellung arbeite ich strukturiert in 5 aufeinanderfolgenden Agenten-Rollen:
@@ -51,6 +54,7 @@ Bei jeder Aufgabenstellung arbeite ich strukturiert in 5 aufeinanderfolgenden Ag
 **Aufgabe:** Kritische Prüfung der Implementierung
  
 - Reviewt alle Änderungen kritisch
+- Nutzt potenzielle Tests und API-Aufrufe, wenn verfügbar
 - Prüft Einhaltung der Architekturvorgaben
 - Prüft Code-Qualität und Best Practices
 - Identifiziert potenzielle Probleme oder Verbesserungen
