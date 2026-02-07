@@ -7,16 +7,23 @@
 ```
 ┌─────────────────────────────────────────────────────┐
 │                   Game Master Agent                  │
-│  (LangGraph + gpt-5-mini + reasoning_effort=low)   │
+│         (LangGraph + multi-provider LLM)            │
 ├─────────────────────────────────────────────────────┤
+│  Providers: OpenAI, xAI, Gemini, Claude, Kimi, Z.AI │
 │  Tools: 44 database operations                       │
 │  Memory: Rolling sessions + Auto-summarization       │
 │  State: Player context, location, messages, summaries│
-└─────────────────────────────────────────────────────┘
+└──────────────────────┬──────────────────────────────┘
+                       │
+            ┌──────────▼──────────┐
+            │   llm_factory.py    │
+            │  build_llm(provider) │
+            └─────────────────────┘
 ```
 
 ## Files
 
+- `llm_factory.py` - **Centralized LLM factory** - `build_llm(provider)` for all 6 providers, eliminates duplication
 - `game_master.py` - **GameMasterAgent** - Main LangGraph agent with narrative generation and reasoning
 - `tools.py` - Database tools the agent can invoke (44 tools)
 - `state.py` - **GameState** TypedDict for agent state management
@@ -24,10 +31,10 @@
 - `prompts.py` - **Centralized LLM prompts** - All prompts separated from code logic
 - `context_builder.py` - **Session context builder** - Builds rich context with inventory, NPCs, items, quests
 - `autocomplete.py` - **Autocomplete handler** - Context-aware action suggestions for player input
+- `memory_manager.py` - **MemoryManager** - Long-term memory via session summaries (uses llm_factory)
 
 **Deprecated:**
 - `chat_history_manager.py` - Old session-based persistence (replaced by StoryManager)
-- `memory_manager.py` - Old memory system (to be refactored)
 
 ## Prompts Module
 
@@ -267,6 +274,7 @@ The agent is exposed via `/game` routes:
 - `DELETE /game/story/{player_id}` - Clear story (reset)
 - `GET /game/health` - Check agent status
 - `POST /game/roll-dice` - Roll d20 with optional luck reroll
+- `GET /game/providers` - List available LLM providers (those with API keys configured)
 
 ### Start Session Enhancement (NEW)
 The `/game/start-session` endpoint now intelligently parses the player's `description` field:
@@ -329,14 +337,23 @@ story_manager.compress_tagged_messages(player_id, "combat:123", summary_text)
 
 Settings in `config.py`:
 
-**LLM Settings** (gpt-5-mini: 400k context, 128k max output, reasoning support):
+**LLM Providers** (see `llm_factory.py` for full registry):
+| Provider | Key env var | Model env var | Default model |
+|----------|-------------|---------------|---------------|
+| OpenAI | `OPENAI_API_KEY` | `OPENAI_MODEL` | gpt-5-mini |
+| xAI (Grok) | `XAI_API_KEY` | `XAI_MODEL` | grok-4-1-fast-reasoning |
+| Google Gemini | `GEMINI_API_KEY` | `GEMINI_MODEL` | gemini-2.5-flash-preview-09-2025 |
+| Anthropic Claude | `CLAUDE_API_KEY` | `CLAUDE_MODEL` | claude-haiku-4-5-latest |
+| Moonshot Kimi | `KIMI_API_KEY` | `KIMI_MODEL` | kimi-k2.5 |
+| Z.AI / ZhipuAI | `ZAI_API_KEY` | `ZAI_MODEL` | glm-4.7-flash |
+
+**LLM Tuning:**
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `OPENAI_API_KEY` | - | Required for LLM calls |
-| `OPENAI_MODEL` | gpt-5-mini | Model to use |
+| `DEFAULT_LLM_PROVIDER` | openai | Provider used when frontend doesn't specify one |
 | `LLM_TEMPERATURE` | 0.8 | Creativity (0.0-2.0), higher = more creative |
-| `LLM_MAX_TOKENS` | 8192 | Max response tokens (model supports up to 128k) |
-| `LLM_REASONING_EFFORT` | low | Reasoning depth: "low", "medium", "high" |
+| `LLM_MAX_TOKENS` | 8192 | Max response tokens |
+| `LLM_REASONING_EFFORT` | low | OpenAI-only: reasoning depth "low"/"medium"/"high" |
 | `SUMMARY_LLM_TEMPERATURE` | 0.3 | Lower temp for consistent summaries |
 | `SUMMARY_LLM_MAX_TOKENS` | 500 | Summary responses are short |
 

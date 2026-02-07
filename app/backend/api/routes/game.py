@@ -11,6 +11,8 @@ from database import get_db
 from models import PlayerCharacter, CombatSession, NonPlayerCharacter
 from agents import create_game_master, get_story_manager, get_memory_manager, autocomplete_action
 from agents.context_builder import build_session_context
+from agents.llm_factory import get_available_providers
+from config import settings
 
 router = APIRouter(prefix="/game", tags=["game"])
 
@@ -372,6 +374,20 @@ def clear_player_story(player_id: int, db: Session = Depends(get_db)):
     return {
         "player_id": player_id,
         "messages_cleared": count
+    }
+
+
+@router.get("/providers")
+def get_llm_providers():
+    """Return LLM providers that have an API key configured.
+
+    The frontend uses this to populate the provider selector dropdown.
+    Only providers with a valid key in .env are returned.
+    """
+    providers = get_available_providers()
+    return {
+        "default": settings.DEFAULT_LLM_PROVIDER,
+        "providers": providers,
     }
 
 

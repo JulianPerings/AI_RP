@@ -6,13 +6,13 @@ Uses the same tools as the Game Master for database queries.
 """
 import logging
 from typing import Optional, List
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
 
 from config import settings
 from .tools import get_player_info, get_location_info, get_npc_info, list_races
 from .story_manager import get_story_manager
 from .prompts import AUTOCOMPLETE_PROMPT
+from .llm_factory import build_llm
 
 logger = logging.getLogger(__name__)
 
@@ -119,41 +119,10 @@ def autocomplete_action(
     )
     
     try:
-        provider = (llm_provider or settings.DEFAULT_LLM_PROVIDER or "openai").lower()
-        if provider not in {"openai", "xai", "gemini", "kimi", "claude"}:
-            raise ValueError(f"Unsupported llm_provider: {provider}")
-
-        api_key = (settings.OPENAI_API_KEY or "").strip()
-        base_url = None
-        model_name = settings.OPENAI_MODEL
-
-        if provider == "gemini":
-            raise ValueError("llm_provider 'gemini' is not implemented")
-        if provider == "kimi":
-            raise ValueError("llm_provider 'kimi' is not implemented")
-        if provider == "claude":
-            raise ValueError("llm_provider 'claude' is not implemented")
-
-        if provider == "xai":
-            api_key = (settings.XAI_API_KEY or "").strip()
-            if not api_key:
-                raise ValueError("XAI_API_KEY is required when llm_provider is 'xai'")
-            base_url = (settings.XAI_BASE_URL or "").strip() or None
-            model_name = settings.XAI_MODEL or model_name
-
-        llm_kwargs = {
-            "model": model_name,
-            "api_key": api_key,
-            "temperature": settings.LLM_TEMPERATURE,
-            "max_tokens": settings.AUTOCOMPLETE_MAX_TOKENS,
-        }
-        if provider == "openai":
-            llm_kwargs["reasoning_effort"] = settings.LLM_REASONING_EFFORT
-        if base_url:
-            llm_kwargs["base_url"] = base_url
-
-        llm = ChatOpenAI(
-            **llm_kwargs
+        llm = build_llm(
+            provider=llm_provider,
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.AUTOCOMPLETE_MAX_TOKENS,
         )
         
         logger.debug(f"[AUTOCOMPLETE] Sending prompt to LLM, user_input='{user_input}'")

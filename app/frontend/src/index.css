@@ -237,6 +237,30 @@ h1, h2, h3, h4 {
   border-radius: 8px;
 }
 
+.provider-select {
+  background: rgba(255,255,255,0.08);
+  color: var(--text-secondary);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.78rem;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.provider-select:hover,
+.provider-select:focus {
+  border-color: var(--gold);
+  color: var(--text);
+}
+
+.provider-select option {
+  background: var(--bg);
+  color: var(--text);
+}
+
 .chat-header-center {
   display: flex;
   align-items: center;

@@ -112,3 +112,9 @@ export async function getCombatState(playerId) {
   if (!res.ok) throw new Error('Failed to fetch combat state');
   return res.json();
 }
+
+export async function getAvailableProviders() {
+  const res = await fetch(`${API_BASE}/game/providers`);
+  if (!res.ok) throw new Error('Failed to fetch providers');
+  return res.json();
+}

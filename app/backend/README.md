@@ -33,24 +33,27 @@ docker-compose exec backend python seed.py
 ```
 
 ## Tech Stack
-FastAPI, SQLAlchemy, PostgreSQL, OpenAI API, LangGraph, LangChain
+FastAPI, SQLAlchemy, PostgreSQL, LangGraph, LangChain, LangChain-Anthropic
 
-## LLM Provider
+## LLM Providers
 
-The backend can route LLM calls to either OpenAI or xAI (Grok) via OpenAI-compatible API.
+All provider logic lives in `agents/llm_factory.py`. A provider is available when its API key is set in `.env`.
 
-- Default provider is configured via `DEFAULT_LLM_PROVIDER`.
-- Requests may override provider by including `llm_provider` (`openai` or `xai`) on:
+| Provider | ID | Backend | Model default |
+|----------|----|---------|---------------|
+| OpenAI | `openai` | ChatOpenAI | gpt-5-mini |
+| xAI (Grok) | `xai` | ChatOpenAI (base_url) | grok-4-1-fast-reasoning |
+| Google Gemini | `gemini` | ChatOpenAI (OpenAI-compat) | gemini-2.5-flash-preview-09-2025 |
+| Anthropic Claude | `claude` | ChatAnthropic | claude-haiku-4-5-latest |
+| Moonshot Kimi | `kimi` | ChatOpenAI (base_url) | kimi-k2.5 |
+| Z.AI / ZhipuAI | `zai` | ChatOpenAI (base_url) | glm-4.7-flash |
+
+- Default provider is configured via `DEFAULT_LLM_PROVIDER` in `.env`.
+- Requests may override the provider by including `llm_provider` on:
   - `POST /game/start-session`
   - `POST /game/chat`
   - `POST /game/autocomplete`
-
-When using `llm_provider="xai"`, `XAI_API_KEY` must be set.
-
-The following providers are recognized as placeholders but are not implemented yet:
-- `gemini`
-- `kimi`
-- `claude`
+- `GET /game/providers` returns the list of providers that have a key configured, so the frontend can populate a selector dynamically.
 
 ## Logging
 

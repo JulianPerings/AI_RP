@@ -10,6 +10,16 @@ class Settings(BaseSettings):
     XAI_API_KEY: str = ""
     XAI_BASE_URL: str = "https://api.x.ai/v1"
     XAI_MODEL: str = "grok-4-1-fast-reasoning"
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.5-flash-preview-09-2025"
+    CLAUDE_API_KEY: str = ""
+    CLAUDE_MODEL: str = "claude-haiku-4-5-latest"
+    KIMI_API_KEY: str = ""
+    KIMI_BASE_URL: str = "https://api.moonshot.cn/v1"
+    KIMI_MODEL: str = "kimi-k2.5"
+    ZAI_API_KEY: str = ""
+    ZAI_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4/"
+    ZAI_MODEL: str = "glm-4.7-flash"
     DEFAULT_LLM_PROVIDER: str = "openai"
 
     LLM_TEMPERATURE: float = 0.8            # Creativity (0.0-2.0), higher = more creative

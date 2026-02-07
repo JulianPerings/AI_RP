@@ -4,12 +4,13 @@ Provides session summaries and keyword-based memory search.
 """
 import logging
 from typing import List, Optional
-from openai import OpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from database import SessionLocal
 from models import ChatSession, ChatMessage
 from config import settings
 from .prompts import MEMORY_SUMMARY_PROMPT
+from .llm_factory import build_llm
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +19,10 @@ class MemoryManager:
     """Manages long-term memory through session summaries and search."""
     
     def __init__(self):
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
-        self.summary_model = "gpt-5-mini"  # Cheaper model for summaries
+        self.summary_llm = build_llm(
+            temperature=settings.SUMMARY_LLM_TEMPERATURE,
+            max_tokens=settings.SUMMARY_LLM_MAX_TOKENS,
+        )
     
     def _get_db(self):
         return SessionLocal()
@@ -49,17 +52,12 @@ class MemoryManager:
                     conversation_text += f"GAME MASTER: {msg.content}\n"
             
             # Generate summary using LLM
-            response = self.client.chat.completions.create(
-                model=self.summary_model,
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant that summarizes RPG game sessions."},
-                    {"role": "user", "content": MEMORY_SUMMARY_PROMPT.format(conversation=conversation_text[:8000])}
-                ],
-                temperature=0.3,
-                max_tokens=500
-            )
+            response = self.summary_llm.invoke([
+                SystemMessage(content="You are a helpful assistant that summarizes RPG game sessions."),
+                HumanMessage(content=MEMORY_SUMMARY_PROMPT.format(conversation=conversation_text[:8000])),
+            ])
             
-            result_text = response.choices[0].message.content
+            result_text = response.content
             
             # Parse the response
             title = ""

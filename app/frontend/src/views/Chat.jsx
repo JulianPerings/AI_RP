@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { getPlayer, startSession, sendMessage, getStory, autocompleteAction, getPlayerInventory, getItemTemplate, rollDice, getCombatState } from '../api'
+import { getPlayer, startSession, sendMessage, getStory, autocompleteAction, getPlayerInventory, getItemTemplate, rollDice, getCombatState, getAvailableProviders } from '../api'
 import CombatHud from '../components/CombatHud'
 
 const LOADING_MESSAGES = [
@@ -19,12 +19,23 @@ function Chat() {
   const [searchParams] = useSearchParams()
   const isNewCharacter = searchParams.get('new') === 'true'
 
+  const [providers, setProviders] = useState([])
+  const [defaultProvider, setDefaultProvider] = useState(null)
+
   function getLlmProvider() {
     const stored = window.localStorage.getItem('llm_provider')
-    if (stored === 'openai' || stored === 'xai' || stored === 'gemini' || stored === 'kimi' || stored === 'claude') {
+    if (stored && providers.some(p => p.id === stored)) {
       return stored
     }
-    return null
+    return null  // backend uses its DEFAULT_LLM_PROVIDER
+  }
+
+  function setLlmProvider(id) {
+    if (id) {
+      window.localStorage.setItem('llm_provider', id)
+    } else {
+      window.localStorage.removeItem('llm_provider')
+    }
   }
   
   const [player, setPlayer] = useState(null)
@@ -115,6 +126,16 @@ function Chat() {
   async function initializeChat() {
     try {
       setLoading(true)
+
+      // Load available LLM providers
+      try {
+        const providerData = await getAvailableProviders()
+        setProviders(providerData.providers || [])
+        setDefaultProvider(providerData.default || null)
+      } catch {
+        console.warn('Could not fetch LLM providers')
+      }
+
       const playerData = await getPlayer(playerId)
       setPlayer(playerData)
 
@@ -330,6 +351,24 @@ function Chat() {
       <div className="chat-header">
         <div className="chat-header-left">
           <Link to="/" className="nav-back">← Exit</Link>
+          {providers.length > 1 && (
+            <select
+              className="provider-select"
+              value={getLlmProvider() || defaultProvider || ''}
+              onChange={(e) => {
+                setLlmProvider(e.target.value || null)
+                // Force re-render so getLlmProvider picks up the change
+                setProviders(prev => [...prev])
+              }}
+              title="LLM Provider"
+            >
+              {providers.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
         
         <div className="chat-header-center">

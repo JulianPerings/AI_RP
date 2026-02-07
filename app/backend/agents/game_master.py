@@ -2,11 +2,9 @@ import logging
 import uuid
 import json
 from typing import Optional, List, Dict, Any
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
-from langgraph.checkpoint.memory import MemorySaver
 
 from config import settings
 from .state import GameState
@@ -14,6 +12,7 @@ from .tools import get_game_tools
 from .story_manager import get_story_manager
 from .prompts import GAME_MASTER_SYSTEM_PROMPT, format_session_start
 from .context_builder import format_context_for_prompt
+from .llm_factory import build_llm, resolve_provider, PROVIDER_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -48,58 +47,24 @@ class GameMasterAgent:
             msg.content = "(empty)"
     
     def __init__(self, model_name: Optional[str] = None, llm_provider: Optional[str] = None):
-        provider = (llm_provider or settings.DEFAULT_LLM_PROVIDER or "openai").lower()
-        if provider not in {"openai", "xai", "gemini", "kimi", "claude"}:
-            raise ValueError(f"Unsupported llm_provider: {provider}")
-
-        self.llm_provider = provider
-
-        api_key = (settings.OPENAI_API_KEY or "").strip()
-        base_url = None
-
-        if provider == "gemini":
-            raise ValueError("llm_provider 'gemini' is not implemented")
-        if provider == "kimi":
-            raise ValueError("llm_provider 'kimi' is not implemented")
-        if provider == "claude":
-            raise ValueError("llm_provider 'claude' is not implemented")
-
-        if provider == "xai":
-            api_key = (settings.XAI_API_KEY or "").strip()
-            if not api_key:
-                raise ValueError("XAI_API_KEY is required when llm_provider is 'xai'")
-            base_url = (settings.XAI_BASE_URL or "").strip() or None
-            self.model_name = (settings.XAI_MODEL or "").strip() or settings.OPENAI_MODEL
-        else:
-            self.model_name = (model_name or "").strip() or settings.OPENAI_MODEL
+        self.llm_provider = resolve_provider(llm_provider)
+        cfg = PROVIDER_CONFIG[self.llm_provider]
+        self.model_name = (getattr(settings, cfg["model_attr"], "") or "").strip()
 
         self.tools = get_game_tools()
+        self.tool_node = ToolNode(self.tools)
 
-        llm_kwargs = {
-            "model": self.model_name,
-            "api_key": api_key,
-            "temperature": settings.LLM_TEMPERATURE,
-            "max_tokens": settings.LLM_MAX_TOKENS,
-        }
-        if provider == "openai":
-            llm_kwargs["reasoning_effort"] = settings.LLM_REASONING_EFFORT
-        if base_url:
-            llm_kwargs["base_url"] = base_url
+        # Main LLM with tool calling
+        base_llm = build_llm(provider=self.llm_provider)
+        self.llm = base_llm.bind_tools(self.tools)
 
-        self.llm = ChatOpenAI(**llm_kwargs).bind_tools(self.tools)
+        # Separate LLM for summarization (lower temp, fewer tokens, no tools)
+        self.summary_llm = build_llm(
+            provider=self.llm_provider,
+            temperature=settings.SUMMARY_LLM_TEMPERATURE,
+            max_tokens=settings.SUMMARY_LLM_MAX_TOKENS,
+        )
 
-        # Separate LLM for summarization (no tools needed)
-        summary_kwargs = {
-            "model": self.model_name,
-            "api_key": api_key,
-            "temperature": settings.SUMMARY_LLM_TEMPERATURE,
-            "max_tokens": settings.SUMMARY_LLM_MAX_TOKENS,
-        }
-        if base_url:
-            summary_kwargs["base_url"] = base_url
-
-        self.summary_llm = ChatOpenAI(**summary_kwargs)
-        self.memory = MemorySaver()
         self.graph = self._build_graph()
     
     def _generate_summary(self, messages_text: str) -> tuple[str, str, str]:
@@ -178,8 +143,7 @@ class GameMasterAgent:
     
     def _log_tool_results(self, state: GameState) -> dict:
         """Wrapper to log tool results."""
-        tool_node = ToolNode(self.tools)
-        result = tool_node.invoke(state)
+        result = self.tool_node.invoke(state)
 
         for msg in result.get("messages", []):
             if isinstance(msg, ToolMessage):
@@ -218,7 +182,7 @@ class GameMasterAgent:
         
         workflow.add_edge("tools", "agent")
         
-        return workflow.compile(checkpointer=self.memory)
+        return workflow.compile()
     
     def chat(self, message: str, player_id: int,
              session_context: Optional[dict] = None) -> tuple[str, List[dict]]:
@@ -294,9 +258,7 @@ _game_master_instances: Dict[str, GameMasterAgent] = {}
 
 
 def create_game_master(llm_provider: Optional[str] = None) -> GameMasterAgent:
-    provider = (llm_provider or settings.DEFAULT_LLM_PROVIDER or "openai").lower()
-    if provider not in {"openai", "xai", "gemini", "kimi", "claude"}:
-        raise ValueError(f"Unsupported llm_provider: {provider}")
+    provider = resolve_provider(llm_provider)
     if provider not in _game_master_instances:
         _game_master_instances[provider] = GameMasterAgent(llm_provider=provider)
     return _game_master_instances[provider]
