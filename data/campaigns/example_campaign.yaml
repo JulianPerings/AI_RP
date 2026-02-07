@@ -1,0 +1,271 @@
+name: "The Cursed Village of Thornhaven"
+description: >
+  A once-prosperous village now withers under a mysterious curse. Crops rot,
+  livestock sicken, and shadows move where none should. The villagers whisper
+  of an ancient shrine deep in the Blackwood Forest — and a bargain gone wrong.
+setting: >
+  Thornhaven is a small medieval village nestled at the edge of the Blackwood
+  Forest. Stone cottages line muddy streets. A perpetual grey mist clings to
+  the treeline. The air smells of damp earth and decay.
+starting_location: village_square
+
+player:
+  name: Adventurer
+  max_hp: 20
+  starting_items:
+    - worn_shortsword
+    - health_potion
+  starting_gold: 15
+
+locations:
+  - id: village_square
+    name: "Thornhaven Village Square"
+    description: >
+      The heart of the village. A cracked stone fountain stands dry in the
+      centre. Weathered notice boards line the wall of the tavern. Villagers
+      shuffle past with hollow eyes.
+    connections:
+      - tavern
+      - blacksmith
+      - village_gate
+    npcs:
+      - elder_maren
+    items: []
+
+  - id: tavern
+    name: "The Hollow Barrel Tavern"
+    description: >
+      A dim, creaky inn that smells of stale ale and wood smoke. A few
+      patrons hunch over their drinks in silence. The barkeep watches you
+      with cautious interest.
+    connections:
+      - village_square
+    npcs:
+      - barkeep_tom
+    items: []
+
+  - id: blacksmith
+    name: "Durin's Forge"
+    description: >
+      The ring of hammer on anvil echoes from within. The forge burns low —
+      Durin has been rationing coal since the trade routes dried up.
+    connections:
+      - village_square
+    npcs:
+      - durin
+    items:
+      - iron_shield
+      - steel_sword
+
+  - id: village_gate
+    name: "The Village Gate"
+    description: >
+      A wooden palisade marks the boundary of Thornhaven. Beyond it, a
+      dirt path vanishes into the creeping fog of Blackwood Forest.
+    connections:
+      - village_square
+      - forest_edge
+
+  - id: forest_edge
+    name: "Edge of Blackwood Forest"
+    description: >
+      Ancient oaks tower overhead, their canopy blotting out the sky. The
+      path forks — one way leads deeper into darkness, the other to a
+      clearing where stone ruins poke through the undergrowth.
+    connections:
+      - village_gate
+      - ancient_shrine
+    npcs:
+      - forest_hermit
+    items:
+      - glowing_mushroom
+
+  - id: ancient_shrine
+    name: "The Ancient Shrine"
+    description: >
+      A crumbling stone altar covered in moss and strange runes. The air
+      hums with a low, unsettling vibration. Dark stains mark the stone.
+    connections:
+      - forest_edge
+    items:
+      - cursed_amulet
+
+npcs:
+  - id: elder_maren
+    name: "Elder Maren"
+    title: "Village Elder"
+    description: "A stooped old woman with sharp eyes and a walking stick carved with runes."
+    personality: >
+      Wise, weary, and burdened by guilt. She knows more about the curse
+      than she lets on. Speaks in measured, careful sentences. Will reveal
+      information gradually if she trusts the player.
+    location: village_square
+    greeting: "Another traveller? Thornhaven has little to offer these days, I'm afraid."
+    topics:
+      - the curse
+      - the shrine
+      - village history
+    quest_giver: true
+    max_hp: 6
+    strength: 2
+    agility: 2
+    mind: 8
+    charisma: 7
+
+  - id: barkeep_tom
+    name: "Tom"
+    title: "Barkeep"
+    description: "A burly man with a thick beard and calloused hands. His apron is permanently stained."
+    personality: >
+      Gruff but good-hearted. Loves gossip and rumours. Will trade
+      information for coin or a good story. Protective of the village folk.
+    location: tavern
+    greeting: "Sit down, stranger. Ale's weak but it's wet. What brings you to Thornhaven?"
+    topics:
+      - village rumours
+      - the forest
+      - travellers
+    merchant: true
+    shop_items:
+      - health_potion
+      - stale_bread
+    max_hp: 14
+    strength: 7
+    agility: 4
+    mind: 4
+    charisma: 6
+
+  - id: durin
+    name: "Durin"
+    title: "Blacksmith"
+    description: "A stocky dwarf with soot-streaked arms and a perpetual scowl."
+    personality: >
+      Proud craftsman, irritable about the state of things, but respects
+      anyone who proves their worth. Speaks bluntly. Hates the curse
+      because it's ruining his trade.
+    location: blacksmith
+    greeting: "If you've got coin, I've got steel. If not, stop wasting my coal."
+    topics:
+      - weapons
+      - armor
+      - the trade routes
+    merchant: true
+    shop_items:
+      - steel_sword
+      - iron_shield
+    max_hp: 18
+    strength: 8
+    agility: 3
+    mind: 4
+    charisma: 3
+
+  - id: forest_hermit
+    name: "Old Whisper"
+    title: "Forest Hermit"
+    description: "A gaunt figure in tattered robes, face half-hidden by a deep hood. Leaves cling to them."
+    personality: >
+      Cryptic and unsettling. Speaks in riddles and half-truths. Knows the
+      forest intimately and has a strange relationship with the curse — not
+      quite its victim, not quite its servant.
+    location: forest_edge
+    greeting: "The trees told me you were coming. They tell me many things."
+    topics:
+      - the shrine
+      - the curse's origin
+      - forest creatures
+    quest_giver: true
+    is_hostile: false
+    max_hp: 8
+    strength: 3
+    agility: 5
+    mind: 9
+    charisma: 4
+
+items:
+  - id: worn_shortsword
+    name: "Worn Shortsword"
+    description: "A battered but serviceable blade. Its edge has seen better days."
+    item_type: weapon
+    value: 5
+    damage: 3
+    equippable: true
+
+  - id: steel_sword
+    name: "Steel Sword"
+    description: "A well-forged blade with a leather-wrapped grip. Reliable and sharp."
+    item_type: weapon
+    value: 30
+    damage: 5
+    equippable: true
+
+  - id: iron_shield
+    name: "Iron Shield"
+    description: "A round shield with a dented boss. Heavy but protective."
+    item_type: armor
+    value: 25
+    armor_bonus: 2
+    equippable: true
+
+  - id: health_potion
+    name: "Health Potion"
+    description: "A small vial of crimson liquid. Restores vitality when consumed."
+    item_type: consumable
+    value: 10
+    heal_amount: 8
+    consumable: true
+    stackable: true
+
+  - id: stale_bread
+    name: "Stale Bread"
+    description: "Hard as a rock, but it'll keep you going."
+    item_type: consumable
+    value: 2
+    heal_amount: 2
+    consumable: true
+    stackable: true
+
+  - id: glowing_mushroom
+    name: "Glowing Mushroom"
+    description: "A faintly luminescent fungus. It pulses with an inner light and feels warm to the touch."
+    item_type: quest
+    value: 0
+    quest_item: true
+
+  - id: cursed_amulet
+    name: "Cursed Amulet"
+    description: "A tarnished silver pendant set with a dark gem. It whispers at the edge of hearing."
+    item_type: quest
+    value: 0
+    quest_item: true
+
+quests:
+  - id: break_the_curse
+    name: "Break the Curse"
+    description: >
+      Discover the source of the curse plaguing Thornhaven and find a way
+      to lift it. Elder Maren believes the answer lies in the Blackwood
+      Forest at an ancient shrine.
+    giver_npc: elder_maren
+    objectives:
+      - "Speak with Elder Maren about the curse"
+      - "Travel to the Blackwood Forest"
+      - "Find the Ancient Shrine"
+      - "Discover the source of the curse"
+      - "Lift the curse (or bargain with it)"
+    rewards:
+      - "gold:100"
+      - steel_sword
+
+  - id: the_hermits_riddle
+    name: "The Hermit's Riddle"
+    description: >
+      Old Whisper, the forest hermit, offers cryptic guidance — but only
+      to those who prove they can listen. Bring a glowing mushroom from
+      the forest depths to earn their trust.
+    giver_npc: forest_hermit
+    objectives:
+      - "Find Old Whisper at the forest edge"
+      - "Collect a Glowing Mushroom"
+      - "Return the mushroom to Old Whisper"
+    rewards:
+      - "gold:25"

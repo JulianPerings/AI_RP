@@ -1,152 +1,95 @@
-# AI RPG Application
+# AI RPG
 
-An AI-powered RPG game with React frontend, FastAPI backend, and OpenAI Game Master.
+A narrative-driven, AI-powered RPG where a GameMaster AI orchestrates your adventure. Interact with dynamically generated NPCs, manage inventory and relationships, and experience combat driven by a simplified d10 stat system — all wrapped in rich prose.
 
-## Project Structure
+## Architecture
 
 ```
-app/
-├── backend/         # FastAPI backend
-│   ├── agents/      # LangGraph AI agents & tools
-│   ├── api/         # API routes
-│   ├── models/      # SQLAlchemy models
-│   ├── schemas/     # Pydantic schemas
-│   ├── main.py      # FastAPI app
-│   ├── config.py    # Configuration
-│   └── database.py  # Database connection
-└── frontend/        # React + Vite UI
-    ├── src/
-    │   ├── views/   # PlayerList, CreatePlayer, Chat
-    │   ├── api/     # API client
-    │   └── App.jsx
-    └── vite.config.js
+AI_RP/
+├── app/            # Entry point, config, CLI game loop
+├── agents/         # LLM-powered agents (GameMaster, NPC, Campaign Creator)
+├── models/         # Pydantic data models (character, NPC, items, world state)
+├── services/       # Core services (LLM, state, saves, memory, dice)
+├── data/           # Campaign definitions (YAML) and save files
+└── tests/          # Test suite
 ```
 
-## Quick Start with Docker
+## Core Concepts
 
-1. **Set your API keys in `.env`:**
+- **GameMaster Agent** — Orchestrator that receives player actions, narrates outcomes, and delegates to sub-agents.
+- **NPC Agents** — Per-NPC agents with personality, memory summaries, and relationship tracking.
+- **Campaign Creator Agent** — Generates campaign YAML files from high-level prompts.
+- **Hybrid Combat** — d10 + stat modifier rolls resolved mechanically, then narrated by the GM.
+- **Persistent NPC Memory** — Recent interactions stored verbatim; older ones summarized to keep context windows small.
+
+## Stat System
+
+Four core stats, d10-based checks:
+
+| Stat       | Governs                                      |
+|------------|----------------------------------------------|
+| Strength   | Melee damage, physical feats, carrying        |
+| Agility    | Dodge, ranged attacks, stealth, initiative     |
+| Mind       | Magic, lore, perception, puzzles               |
+| Charisma   | Persuasion, intimidation, NPC disposition      |
+
+**Checks**: `d10 + stat_modifier + skill_bonus` vs. difficulty threshold.
+
+## Setup
+
 ```bash
-OPENAI_API_KEY=your_actual_key_here
-XAI_API_KEY=your_actual_xai_key_here
-XAI_BASE_URL=https://api.x.ai/v1
-XAI_MODEL=grok-4-1-fast-reasoning
-```
-
-`docker-compose.yml` loads the repo-root `.env` file into the backend container.
-Make sure `XAI_API_KEY` has no leading/trailing whitespace.
-
-2. **Start the application:**
-```bash
-docker-compose up --build
-```
-
-3. **Access the application:**
-- **Frontend UI**: http://localhost:5173
-- **SWAGGER API endpoints**: http://localhost:8000/docs
-- **API Base**: http://localhost:8000
-
-## Features
-
-### Frontend UI
-- **Player List** - View all characters with stats (health, gold, XP, level)
-- **Create Character** - Form with name, class, race, location, backstory, starting gold/health
-- **Chat Interface** - Real-time conversation with AI Game Master
-  - Loading indicator while GM responds
-  - Tool calls displayed for transparency
-  - Stats refresh after each response
-
-### AI Game Master
-LangGraph-powered agent that creates immersive narratives using 20+ tools:
-- Query/modify player stats, inventory, quests, relationships
-- Create items with unique buffs/flaws
-- Spawn NPCs and manage locations
-- Parse character backstories to auto-create items/NPCs on session start
-- Long-term memory system for continuity across sessions
-
-### Session Management
-- Persistent chat history per session
-- Previous session summary
-
-## API Endpoints
-
-### Game Master
-- `POST /game/start-session` - Start session (uses existing session_id if available)
-- `POST /game/chat` - Send player action, receive narrative response
-- `GET /game/history/{session_id}` - Get chat history
-- `POST /game/memory/summarize/{session_id}` - Generate session summary
-- `GET /game/memory/search/{player_id}?query=...` - Search past memories
-
-### Player Characters
-- `POST /player-characters/` - Create player character
-- `GET /player-characters/` - List all player characters
-- `GET /player-characters/{id}` - Get specific player character
-- `PUT /player-characters/{id}` - Update player character
-- `DELETE /player-characters/{id}` - Delete player character
-
-### Other Resources
-Standard CRUD endpoints for: NPCs, Items, Locations, Quests, Races, Factions
-
-## Database Schema
-
-### Core Models
-- **player_character**: Name, class, level, health, gold, current_session_id
-- **non_player_character**: Name, type, health, behavior_state, personality_traits
-- **item_template**: Item blueprints (name, category, rarity, properties)
-- **item_instance**: Actual items with owner, location, buffs, flaws, enchantments
-- **location**: Name, description, type
-- **quest**: Title, description, status, rewards
-- **chat_session**: Session_id, player_id, summary, keywords (for memory)
-- **chat_message**: Role, content, tool_calls, timestamps
-
-### Relationships
-- **character_relationship**: Unified PC↔NPC, NPC↔NPC relationships with canonical ordering
-- **race_relationship**: Race affinity matrix
-- **faction_relationship**: Faction dynamics
-
-## Development
-
-### Without Docker
-
-1. Create virtual environment:
-```bash
-cd app/backend
+# 1. Create and activate a virtual environment
 python -m venv venv
 source venv/bin/activate
-```
 
-2. Install dependencies:
-```bash
+# 2. Install dependencies
 pip install -r requirements.txt
+
+# 3. Copy and fill in your API keys
+cp .env.example .env
+# Edit .env with your keys
+
+# 4. Run the game
+python -m app.main
 ```
 
-3. Set up PostgreSQL and update `.env` in backend folder
+## Configuration
 
-4. Run the application:
+Copy `.env.example` to `.env` and set your API keys. Supported LLM providers:
+
+- **OpenAI** (default)
+- **xAI** (Grok)
+- **Gemini**
+
+Set `DEFAULT_LLM_PROVIDER` in `.env` to choose the default provider. You can also:
+
+- **Pick at startup**: the game shows all providers with their model and key status
+- **CLI flag**: `python -m app.main --provider xai` to skip the prompt
+
+## Debug Mode
+
+See exactly what the agents are thinking — every LLM request and response is logged.
+
 ```bash
-uvicorn main:app --reload
+# Start in debug mode
+python -m app.main --debug
+
+# Or set the env var
+AI_RPG_DEBUG=1 python -m app.main
 ```
 
-## Technologies
+You can also toggle debug mode **during gameplay** by typing `debug`.
 
-- **Frontend**: React 18, React Router, Vite
-- **Backend**: FastAPI, SQLAlchemy, PostgreSQL
-- **AI Agent**: LangGraph, LangChain, OpenAI API (gpt-5-mini), xAI (Grok) via OpenAI-compatible API
-- **Provider selection**: Rotary provider switch in the UI (OpenAI, Grok, Gemini placeholder, Kimi placeholder, Claude placeholder)
-- **Containerization**: Docker, Docker Compose
+Logs go to both the console (stderr) and timestamped files in `logs/`. This lets you inspect:
+- Full system prompts sent to each agent
+- World context injected per turn
+- Raw LLM responses (including structured JSON actions)
+- NPC agent delegation and memory updates
 
-## Recent Updates
+## Campaign Format
 
-### Bug Fixes
-- Fixed tool calls accumulation (unique thread per invocation)
-- Fixed session start prompt appearing in chat history
-- Fixed double session creation (player creation + start-session)
-- Fixed React StrictMode double-initialization
+Campaigns are defined as YAML files in `data/campaigns/`. See `data/campaigns/example_campaign.yaml` for the schema. Campaigns can be hand-written or generated by the Campaign Creator agent.
 
-### New Features
-- **Region & Location System** - Locations link to regions with modifiers (danger, wealth, climate)
-- **Improved Storytelling** - No inventory dumps, no explicit options, concise prose
-- **Duplicate Prevention** - GM checks existing locations/NPCs before creating
-- **NPC Movement** - Escorts move with player, companions auto-follow
-- Item uniqueness system with buffs/flaws
-- Backstory parsing to auto-spawn items/NPCs
-- Long-term memory system for session continuity
+## License
+
+MIT
