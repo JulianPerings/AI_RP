@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { getPlayer, startSession, sendMessage, getStory, autocompleteAction, getPlayerInventory, getItemTemplate, rollDice, getCombatState, getAvailableProviders } from '../api'
+import { getPlayer, startSession, sendMessage, getStory, autocompleteAction, getPlayerInventory, getItemTemplate, rollDice, getCombatState, textToSpeech } from '../api'
 import CombatHud from '../components/CombatHud'
 
 const LOADING_MESSAGES = [
@@ -19,22 +19,11 @@ function Chat() {
   const [searchParams] = useSearchParams()
   const isNewCharacter = searchParams.get('new') === 'true'
 
-  const [providers, setProviders] = useState([])
-  const [defaultProvider, setDefaultProvider] = useState(null)
-
-  function getLlmProvider() {
-    const stored = window.localStorage.getItem('llm_provider')
-    if (stored && providers.some(p => p.id === stored)) {
-      return stored
-    }
-    return null  // backend uses its DEFAULT_LLM_PROVIDER
-  }
-
-  function setLlmProvider(id) {
-    if (id) {
-      window.localStorage.setItem('llm_provider', id)
-    } else {
-      window.localStorage.removeItem('llm_provider')
+  function getLlmSettings() {
+    return {
+      provider: localStorage.getItem('llm_provider') || null,
+      model: localStorage.getItem('llm_model') || null,
+      thinking: localStorage.getItem('llm_thinking') === 'true' ? true : null,
     }
   }
   
@@ -58,6 +47,11 @@ function Chat() {
   const [isRolling, setIsRolling] = useState(false)  // Animation state
   const [diceAnimating, setDiceAnimating] = useState(false)  // Throw animation
   
+  // TTS state — streaming chunked WAV playback
+  const [ttsPlaying, setTtsPlaying] = useState(false)
+  const ttsAudioRef = useRef(null)
+  const ttsControlRef = useRef(null)  // { stopped, queue, playing, audio }
+
   const messagesEndRef = useRef(null)
   const loadingIntervalRef = useRef(null)
   const initializedRef = useRef(false)
@@ -102,6 +96,109 @@ function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
+  function isTtsEnabled() {
+    return localStorage.getItem('tts_enabled') === 'true'
+  }
+
+  async function playTts(text, pid) {
+    if (!isTtsEnabled() || !text) return
+
+    // Stop any previous playback
+    stopTts()
+
+    const ctrl = { stopped: false, queue: [], playing: false, audio: null }
+    ttsControlRef.current = ctrl
+    setTtsPlaying(true)
+
+    // Sequential queue player — starts as soon as the first chunk arrives
+    function playNext() {
+      if (ctrl.stopped || ctrl.queue.length === 0) {
+        ctrl.playing = false
+        // If stream finished and queue drained, we're done
+        if (ctrl.streamDone && ctrl.queue.length === 0 && !ctrl.stopped) {
+          setTtsPlaying(false)
+          ttsControlRef.current = null
+        }
+        return
+      }
+      ctrl.playing = true
+      const blob = ctrl.queue.shift()
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      ctrl.audio = audio
+      ttsAudioRef.current = audio
+      const onFinish = () => {
+        URL.revokeObjectURL(url)
+        ctrl.audio = null
+        playNext()
+      }
+      audio.onended = onFinish
+      audio.onerror = onFinish
+      audio.play().catch(onFinish)
+    }
+
+    try {
+      const response = await textToSpeech(text, pid || playerId)
+      if (ctrl.stopped) return
+
+      const reader = response.body.getReader()
+      let buffer = new Uint8Array(0)
+
+      while (!ctrl.stopped) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        // Append new data to buffer
+        const merged = new Uint8Array(buffer.length + value.length)
+        merged.set(buffer)
+        merged.set(value, buffer.length)
+        buffer = merged
+
+        // Parse length-prefixed WAV chunks: [4-byte BE uint32 length][WAV bytes]
+        while (buffer.length >= 4) {
+          const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+          const chunkLen = view.getUint32(0, false)
+          if (buffer.length < 4 + chunkLen) break
+
+          const wavData = buffer.slice(4, 4 + chunkLen)
+          buffer = buffer.slice(4 + chunkLen)
+
+          ctrl.queue.push(new Blob([wavData], { type: 'audio/wav' }))
+          if (!ctrl.playing) playNext()
+        }
+      }
+
+      ctrl.streamDone = true
+      // If nothing is playing and queue is empty, mark done
+      if (!ctrl.playing && ctrl.queue.length === 0) {
+        setTtsPlaying(false)
+        ttsControlRef.current = null
+      }
+    } catch (err) {
+      console.error('TTS streaming failed:', err)
+      setTtsPlaying(false)
+      ttsControlRef.current = null
+    }
+  }
+
+  function stopTts() {
+    const ctrl = ttsControlRef.current
+    if (ctrl) {
+      ctrl.stopped = true
+      ctrl.queue = []
+      if (ctrl.audio) {
+        ctrl.audio.pause()
+        if (ctrl.audio.src) URL.revokeObjectURL(ctrl.audio.src)
+      }
+    }
+    if (ttsAudioRef.current) {
+      ttsAudioRef.current.pause()
+      ttsAudioRef.current = null
+    }
+    ttsControlRef.current = null
+    setTtsPlaying(false)
+  }
+
   function formatStoryMessages(story) {
     if (!story?.messages) return []
     return story.messages.map(msg => ({
@@ -127,15 +224,6 @@ function Chat() {
     try {
       setLoading(true)
 
-      // Load available LLM providers
-      try {
-        const providerData = await getAvailableProviders()
-        setProviders(providerData.providers || [])
-        setDefaultProvider(providerData.default || null)
-      } catch {
-        console.warn('Could not fetch LLM providers')
-      }
-
       const playerData = await getPlayer(playerId)
       setPlayer(playerData)
 
@@ -152,12 +240,15 @@ function Chat() {
       
       if (isNewCharacter || !story.messages || story.messages.length === 0) {
         // New character or no story - start a fresh session
-        const session = await startSession(parseInt(playerId), getLlmProvider())
+        const { provider, model, thinking } = getLlmSettings()
+        const session = await startSession(parseInt(playerId), provider, model, thinking)
         setMessages([{
           role: 'gm',
           content: session.intro,
           toolCalls: session.tool_calls || []
         }])
+        // Auto-play TTS for session intro
+        playTts(session.intro, playerId)
       } else {
         // Existing story - load messages
         const formatted = formatStoryMessages(story)
@@ -186,10 +277,11 @@ function Chat() {
     
     setAutocompleting(true)
     try {
+      const { provider, model, thinking } = getLlmSettings()
       const result = await autocompleteAction(
         parseInt(playerId),
         input.trim(),
-        getLlmProvider()
+        provider, model, thinking
       )
       console.log('Autocomplete result:', result)
       if (result && result.suggestion) {
@@ -276,11 +368,12 @@ function Chat() {
     setMessages(prev => [...prev, { role: 'player', content: userMessage, tags: tags || [] }])
 
     try {
+      const { provider, model, thinking } = getLlmSettings()
       const response = await sendMessage(
         parseInt(playerId),
         userMessage,
         tags,
-        getLlmProvider()
+        provider, model, thinking
       )
 
       const gmToolCalls = response.tool_calls || []
@@ -296,6 +389,9 @@ function Chat() {
         }])
       }
       
+      // Auto-play TTS for GM response
+      playTts(response.response, playerId)
+
       // Refresh player stats (health, gold may have changed)
       const updatedPlayer = await getPlayer(playerId)
       setPlayer(updatedPlayer)
@@ -351,24 +447,6 @@ function Chat() {
       <div className="chat-header">
         <div className="chat-header-left">
           <Link to="/" className="nav-back">← Exit</Link>
-          {providers.length > 1 && (
-            <select
-              className="provider-select"
-              value={getLlmProvider() || defaultProvider || ''}
-              onChange={(e) => {
-                setLlmProvider(e.target.value || null)
-                // Force re-render so getLlmProvider picks up the change
-                setProviders(prev => [...prev])
-              }}
-              title="LLM Provider"
-            >
-              {providers.map(p => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          )}
         </div>
         
         <div className="chat-header-center">
@@ -420,7 +498,21 @@ function Chat() {
         {messages.map((msg, idx) => (
           <div key={idx} className={`message message-${msg.role === 'gm' ? 'gm' : 'player'}`}>
             <div className="message-label">
-              {msg.role === 'gm' ? '📖 Game Master' : '⚔️ You'}
+              {msg.role === 'gm' ? (
+                <>
+                  📖 Game Master
+                  {isTtsEnabled() && (
+                    <button
+                      type="button"
+                      className="btn-tts-play"
+                      onClick={(e) => { e.stopPropagation(); playTts(msg.content, playerId) }}
+                      title="Play narration"
+                    >
+                      {ttsPlaying ? '⏹' : '🔊'}
+                    </button>
+                  )}
+                </>
+              ) : '⚔️ You'}
             </div>
             <div className="message-content">{msg.content}</div>
             {msg.toolCalls && msg.toolCalls.length > 0 && (

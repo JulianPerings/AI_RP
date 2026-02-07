@@ -10,7 +10,7 @@
 │         (LangGraph + multi-provider LLM)            │
 ├─────────────────────────────────────────────────────┤
 │  Providers: OpenAI, xAI, Gemini, Claude, Kimi, Z.AI │
-│  Tools: 44 database operations                       │
+│  Tools: 46 database operations                       │
 │  Memory: Rolling sessions + Auto-summarization       │
 │  State: Player context, location, messages, summaries│
 └──────────────────────┬──────────────────────────────┘
@@ -25,16 +25,42 @@
 
 - `llm_factory.py` - **Centralized LLM factory** - `build_llm(provider)` for all 6 providers, eliminates duplication
 - `game_master.py` - **GameMasterAgent** - Main LangGraph agent with narrative generation and reasoning
-- `tools.py` - Database tools the agent can invoke (44 tools)
+- `tools.py` - Database tools the agent can invoke (46 tools)
 - `state.py` - **GameState** TypedDict for agent state management
 - `story_manager.py` - **StoryManager** - Simplified story storage in PlayerCharacter.story_messages
 - `prompts.py` - **Centralized LLM prompts** - All prompts separated from code logic
 - `context_builder.py` - **Session context builder** - Builds rich context with inventory, NPCs, items, quests
 - `autocomplete.py` - **Autocomplete handler** - Context-aware action suggestions for player input
 - `memory_manager.py` - **MemoryManager** - Long-term memory via session summaries (uses llm_factory)
+- `tts_prompts.py` - **TTS Director prompt** - System prompt for the TTS Director LLM
+- `tts_director.py` - **TTS Director** - LLM that transforms GM text into a structured TTS script with speaker segmentation, mood, and gender detection
+- `tts_service.py` - **TTS Service** - Calls Gemini TTS API with multi-speaker voices, handles 2-speaker batching
 
 **Deprecated:**
 - `chat_history_manager.py` - Old session-based persistence (replaced by StoryManager)
+
+## TTS Pipeline (Gemini)
+
+```
+GM text → TTS Director LLM → JSON script → micro-batch → Gemini TTS → stream WAV chunks
+              (mood, gender,      (≤3 segs/batch,    (multi-speaker,
+               speech opt.)        2-speaker limit)    voice pool)
+```
+
+- **Streaming**: Response is chunked WAV (length-prefixed binary). Frontend starts playback as soon as the first batch arrives (~8-12s) rather than waiting for the full audio (~25-35s).
+- **Director model**: Configurable via `TTS_DIRECTOR_MODEL` in `.env` (default: `gemini-2.5-flash-lite`)
+- **TTS model**: `TTS_MODEL` (default: `gemini-2.5-flash-preview-tts`)
+- **Multi-speaker**: Narrator + NPC name (max 2 per Gemini API call). Multiple NPCs are batched separately.
+- **Named speakers**: Director uses actual NPC names (e.g. "Baron Aldric") instead of generic "Character". NPC context from the player's current location is injected into the Director prompt.
+- **NPC voice persistence**: Voices auto-assigned on first TTS are saved to `NonPlayerCharacter.voice` in the DB. Future messages reuse the stored voice. Random/unnamed NPCs get ephemeral voices from the mood pool.
+- **Voice resolution priority**: (1) stored DB voice → (2) recent voice history → (3) per-message speaker lock → (4) mood-based pool pick
+- **Voice history cache**: Last 3 TTS voice assignments per player are cached in-memory for cross-message consistency (covers unnamed NPCs between messages)
+- **Voice config** (`.env`): `TTS_NARRATOR_VOICE`, `TTS_CHARACTER_VOICE_FEMALE`, `TTS_CHARACTER_VOICE_MALE`
+- **Micro-batching**: Segments split into batches of ≤3 for lower latency, respecting the 2-speaker limit
+- **API**: `POST /game/tts` accepts `{"text": "...", "player_id": 1}`, returns `application/octet-stream` (length-prefixed WAV chunks)
+- **Frontend**: Toggle in settings modal (only visible when `GEMINI_API_KEY` is set), auto-plays on GM responses with streaming queue playback
+
+TODO: Currently Gemini-only. Refactor when adding other TTS providers.
 
 ## Prompts Module
 
@@ -338,14 +364,18 @@ story_manager.compress_tagged_messages(player_id, "combat:123", summary_text)
 Settings in `config.py`:
 
 **LLM Providers** (see `llm_factory.py` for full registry):
-| Provider | Key env var | Model env var | Default model |
-|----------|-------------|---------------|---------------|
-| OpenAI | `OPENAI_API_KEY` | `OPENAI_MODEL` | gpt-5-mini |
-| xAI (Grok) | `XAI_API_KEY` | `XAI_MODEL` | grok-4-1-fast-reasoning |
-| Google Gemini | `GEMINI_API_KEY` | `GEMINI_MODEL` | gemini-2.5-flash-preview-09-2025 |
-| Anthropic Claude | `CLAUDE_API_KEY` | `CLAUDE_MODEL` | claude-haiku-4-5-latest |
-| Moonshot Kimi | `KIMI_API_KEY` | `KIMI_MODEL` | kimi-k2.5 |
-| Z.AI / ZhipuAI | `ZAI_API_KEY` | `ZAI_MODEL` | glm-4.7-flash |
+| Provider | Key env var | Default model | Thinking method |
+|----------|-------------|---------------|------------------|
+| OpenAI | `OPENAI_API_KEY` | gpt-5-mini | `reasoning_effort` |
+| xAI (Grok) | `XAI_API_KEY` | grok-4-1-fast-reasoning | — |
+| Google Gemini | `GEMINI_API_KEY` | gemini-2.5-flash-preview-09-2025 | `reasoning_effort` |
+| Anthropic Claude | `CLAUDE_API_KEY` | claude-haiku-4-5-latest | `extended_thinking` |
+| Moonshot Kimi | `KIMI_API_KEY` | kimi-k2.5 | — |
+| Z.AI / ZhipuAI | `ZAI_API_KEY` | glm-4.7-flash | — |
+
+**Model selection:** Each provider exposes multiple models via `MODEL_REGISTRY` in `llm_factory.py`.
+The frontend settings modal lets the user pick a specific model per provider.
+Models marked with `thinking: True` show a toggle for reasoning/thinking mode (defaults to low effort).
 
 **LLM Tuning:**
 | Setting | Default | Description |
@@ -353,7 +383,7 @@ Settings in `config.py`:
 | `DEFAULT_LLM_PROVIDER` | openai | Provider used when frontend doesn't specify one |
 | `LLM_TEMPERATURE` | 0.8 | Creativity (0.0-2.0), higher = more creative |
 | `LLM_MAX_TOKENS` | 8192 | Max response tokens |
-| `LLM_REASONING_EFFORT` | low | OpenAI-only: reasoning depth "low"/"medium"/"high" |
+| `LLM_REASONING_EFFORT` | low | Reasoning depth for thinking-capable models: "low", "medium", "high" |
 | `SUMMARY_LLM_TEMPERATURE` | 0.3 | Lower temp for consistent summaries |
 | `SUMMARY_LLM_MAX_TOKENS` | 500 | Summary responses are short |
 

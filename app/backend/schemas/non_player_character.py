@@ -15,6 +15,7 @@ class NonPlayerCharacterCreate(BaseModel):
     race_id: Optional[int] = None
     faction_id: Optional[int] = None
     personality_traits: Optional[Dict[str, bool]] = None
+    voice: Optional[str] = None
 
 class NonPlayerCharacterResponse(BaseModel):
     id: int
@@ -30,6 +31,7 @@ class NonPlayerCharacterResponse(BaseModel):
     race_id: Optional[int]
     faction_id: Optional[int]
     personality_traits: Optional[Dict[str, bool]]
+    voice: Optional[str]
 
     class Config:
         from_attributes = True

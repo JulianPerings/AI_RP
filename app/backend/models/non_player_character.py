@@ -27,3 +27,5 @@ class NonPlayerCharacter(Base):
     personality_traits = Column(JSON, default=dict)
     # Companion system: if set, this NPC follows the player and moves with them
     following_player_id = Column(Integer, ForeignKey("player_character.id"), nullable=True)
+    # TTS voice name (auto-assigned on first TTS, reused for consistency)
+    voice = Column(String(50), nullable=True)

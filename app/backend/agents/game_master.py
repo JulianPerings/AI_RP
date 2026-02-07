@@ -46,21 +46,33 @@ class GameMasterAgent:
         if not (msg.content or "").strip():
             msg.content = "(empty)"
     
-    def __init__(self, model_name: Optional[str] = None, llm_provider: Optional[str] = None):
+    def __init__(self, llm_provider: Optional[str] = None,
+                 model: Optional[str] = None, thinking: Optional[bool] = None):
         self.llm_provider = resolve_provider(llm_provider)
         cfg = PROVIDER_CONFIG[self.llm_provider]
-        self.model_name = (getattr(settings, cfg["model_attr"], "") or "").strip()
+        self.model_name = (
+            (model or "").strip()
+            or (getattr(settings, cfg["model_attr"], "") or "").strip()
+        )
+        self.thinking = thinking
 
         self.tools = get_game_tools()
         self.tool_node = ToolNode(self.tools)
 
         # Main LLM with tool calling
-        base_llm = build_llm(provider=self.llm_provider)
+        base_llm = build_llm(
+            provider=self.llm_provider, model=self.model_name, thinking=thinking,
+        )
         self.llm = base_llm.bind_tools(self.tools)
+        logger.debug(
+            f"[INIT] Bound {len(self.tools)} tools to {self.llm_provider}/{self.model_name}: "
+            f"{[t.name for t in self.tools]}"
+        )
 
         # Separate LLM for summarization (lower temp, fewer tokens, no tools)
         self.summary_llm = build_llm(
             provider=self.llm_provider,
+            model=self.model_name,
             temperature=settings.SUMMARY_LLM_TEMPERATURE,
             max_tokens=settings.SUMMARY_LLM_MAX_TOKENS,
         )
@@ -137,7 +149,9 @@ class GameMasterAgent:
         # Log tool calls if any
         if hasattr(response, "tool_calls") and response.tool_calls:
             for tc in response.tool_calls:
-                logger.info(f"[TOOL CALL] {tc['name']}({tc['args']})")
+                logger.debug(f"[TOOL CALL] {tc['name']}({tc['args']})")
+        else:
+            logger.debug(f"[MODEL] No tool calls in response ({len(response.content)} chars)")
         
         return {"messages": [response]}
     
@@ -158,7 +172,7 @@ class GameMasterAgent:
         # Log tool results
         for msg in result.get("messages", []):
             if isinstance(msg, ToolMessage):
-                logger.info(f"[TOOL RESULT] {msg.name}: {msg.content[:200]}..." if len(str(msg.content)) > 200 else f"[TOOL RESULT] {msg.name}: {msg.content}")
+                logger.debug(f"[TOOL RESULT] {msg.name}: {msg.content[:200]}..." if len(str(msg.content)) > 200 else f"[TOOL RESULT] {msg.name}: {msg.content}")
         
         return result
     
@@ -219,7 +233,8 @@ class GameMasterAgent:
             "previous_summaries": []  # TODO: Implement new memory system
         }
         
-        logger.info(f"[CHAT] Player {player_id} | History: {len(history_messages)} msgs | Message: {message[:100]}...")
+        logger.info(f"[CHAT] Player {player_id} | provider={self.llm_provider} model={self.model_name} | History: {len(history_messages)} msgs")
+        logger.debug(f"[CHAT] Message: {message[:300]}")
         
         # Track how many messages we started with
         initial_message_count = len(initial_state["messages"])
@@ -257,8 +272,15 @@ class GameMasterAgent:
 _game_master_instances: Dict[str, GameMasterAgent] = {}
 
 
-def create_game_master(llm_provider: Optional[str] = None) -> GameMasterAgent:
+def create_game_master(
+    llm_provider: Optional[str] = None,
+    model: Optional[str] = None,
+    thinking: Optional[bool] = None,
+) -> GameMasterAgent:
     provider = resolve_provider(llm_provider)
-    if provider not in _game_master_instances:
-        _game_master_instances[provider] = GameMasterAgent(llm_provider=provider)
-    return _game_master_instances[provider]
+    cache_key = f"{provider}:{model or ''}:{thinking}"
+    if cache_key not in _game_master_instances:
+        _game_master_instances[cache_key] = GameMasterAgent(
+            llm_provider=provider, model=model, thinking=thinking,
+        )
+    return _game_master_instances[cache_key]

@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     ZAI_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4/"
     ZAI_MODEL: str = "glm-4.7-flash"
     DEFAULT_LLM_PROVIDER: str = "openai"
+    DEBUG_MODE: bool = False                   # Set to true for verbose debug logging
 
     LLM_TEMPERATURE: float = 0.8            # Creativity (0.0-2.0), higher = more creative
     LLM_MAX_TOKENS: int = 8192              # Max response tokens (model supports up to 128k)
@@ -29,6 +30,15 @@ class Settings(BaseSettings):
     SUMMARY_LLM_MAX_TOKENS: int = 500       # Summary responses are short
     AUTOCOMPLETE_MAX_TOKENS: int = 1024     # Tokens for autocomplete (needs room for reasoning)
     
+    # TTS (Text-to-Speech) — Gemini only for now
+    # TODO: When adding non-Gemini TTS providers, refactor TTS_DIRECTOR_MODEL
+    # to support other providers (currently assumes Gemini via google-genai SDK).
+    TTS_MODEL: str = "gemini-2.5-flash-preview-tts"   # Gemini TTS model
+    TTS_DIRECTOR_MODEL: str = "gemini-2.5-flash-lite"  # LLM that transforms GM text → TTS script
+    TTS_NARRATOR_VOICE: str = "Charon"                 # Male, informative narrator
+    TTS_CHARACTER_VOICE_FEMALE: str = "Aoede"           # Default female NPC voice
+    TTS_CHARACTER_VOICE_MALE: str = "Puck"              # Default male NPC voice
+
     # Session management
     MIN_MESSAGES_IN_SESSION: int = 15       # Keep at least this many messages in active session
     MAX_MESSAGES_BEFORE_ARCHIVE: int = 30   # Archive oldest messages when this limit is reached

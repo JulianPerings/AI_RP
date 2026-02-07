@@ -22,17 +22,17 @@ export async function createPlayer(data) {
   return res.json();
 }
 
-export async function startSession(playerId, llmProvider = null) {
+export async function startSession(playerId, llmProvider = null, model = null, thinking = null) {
   const res = await fetch(`${API_BASE}/game/start-session`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ player_id: playerId, llm_provider: llmProvider })
+    body: JSON.stringify({ player_id: playerId, llm_provider: llmProvider, model, thinking })
   });
   if (!res.ok) throw new Error('Failed to start session');
   return res.json();
 }
 
-export async function sendMessage(playerId, message, tags = null, llmProvider = null) {
+export async function sendMessage(playerId, message, tags = null, llmProvider = null, model = null, thinking = null) {
   const res = await fetch(`${API_BASE}/game/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -40,7 +40,9 @@ export async function sendMessage(playerId, message, tags = null, llmProvider = 
       player_id: playerId,
       message,
       tags,
-      llm_provider: llmProvider
+      llm_provider: llmProvider,
+      model,
+      thinking
     })
   });
   if (!res.ok) throw new Error('Failed to send message');
@@ -65,14 +67,16 @@ export async function getRaces() {
   return res.json();
 }
 
-export async function autocompleteAction(playerId, userInput = '', llmProvider = null) {
+export async function autocompleteAction(playerId, userInput = '', llmProvider = null, model = null, thinking = null) {
   const res = await fetch(`${API_BASE}/game/autocomplete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       player_id: playerId,
       user_input: userInput,
-      llm_provider: llmProvider
+      llm_provider: llmProvider,
+      model,
+      thinking
     })
   });
   if (!res.ok) throw new Error('Failed to autocomplete');
@@ -117,4 +121,16 @@ export async function getAvailableProviders() {
   const res = await fetch(`${API_BASE}/game/providers`);
   if (!res.ok) throw new Error('Failed to fetch providers');
   return res.json();
+}
+
+export async function textToSpeech(text, playerId) {
+  const body = { text };
+  if (playerId) body.player_id = parseInt(playerId);
+  const res = await fetch(`${API_BASE}/game/tts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error('TTS generation failed');
+  return res;  // raw Response — caller reads the chunked-wav stream
 }

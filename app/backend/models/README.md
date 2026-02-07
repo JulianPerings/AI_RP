@@ -4,7 +4,7 @@
 
 ## Core Entity Models
 - `player_character.py` - PlayerCharacter (name, class, level, health, gold, **luck**, race, faction, reputation, **story_messages**)
-- `non_player_character.py` - NonPlayerCharacter (name, type, health, behavior_state, base_disposition, race, faction, personality_traits, **following_player_id**)
+- `non_player_character.py` - NonPlayerCharacter (name, type, health, behavior_state, base_disposition, race, faction, personality_traits, **following_player_id**, **voice**)
 - `item_template.py` - **ItemTemplate** - Item blueprints (name, category, rarity, weight, properties, requirements)
 - `item_instance.py` - **ItemInstance** - Actual items in world (template_id, owner, location, equipped, quantity, durability, enchantments)
 - `region.py` - **Region** - World regions containing locations (name, description, races, wealth, climate, political, danger, threats, history)

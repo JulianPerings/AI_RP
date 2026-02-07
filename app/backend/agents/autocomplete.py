@@ -30,7 +30,9 @@ def autocomplete_action(
     player_id: int,
     user_input: str = "",
     session_context: Optional[dict] = None,
-    llm_provider: Optional[str] = None
+    llm_provider: Optional[str] = None,
+    model: Optional[str] = None,
+    thinking: Optional[bool] = None,
 ) -> str:
     """
     Generate or polish a player action based on context.
@@ -121,8 +123,10 @@ def autocomplete_action(
     try:
         llm = build_llm(
             provider=llm_provider,
+            model=model,
             temperature=settings.LLM_TEMPERATURE,
             max_tokens=settings.AUTOCOMPLETE_MAX_TOKENS,
+            thinking=thinking,
         )
         
         logger.debug(f"[AUTOCOMPLETE] Sending prompt to LLM, user_input='{user_input}'")

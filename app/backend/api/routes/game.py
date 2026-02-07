@@ -1,6 +1,7 @@
 import logging
 import random
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.orm import Session
@@ -12,6 +13,7 @@ from models import PlayerCharacter, CombatSession, NonPlayerCharacter
 from agents import create_game_master, get_story_manager, get_memory_manager, autocomplete_action
 from agents.context_builder import build_session_context
 from agents.llm_factory import get_available_providers
+from agents.tts_service import generate_tts_stream, is_tts_available
 from config import settings
 
 router = APIRouter(prefix="/game", tags=["game"])
@@ -22,6 +24,8 @@ class ChatRequest(BaseModel):
     player_id: int
     tags: Optional[list] = None  # Optional tags for the message (e.g., dice roll)
     llm_provider: Optional[str] = None
+    model: Optional[str] = None
+    thinking: Optional[bool] = None
 
 
 class ChatResponse(BaseModel):
@@ -32,6 +36,8 @@ class ChatResponse(BaseModel):
 class StartSessionRequest(BaseModel):
     player_id: int
     llm_provider: Optional[str] = None
+    model: Optional[str] = None
+    thinking: Optional[bool] = None
 
 
 class StartSessionResponse(BaseModel):
@@ -44,6 +50,8 @@ class AutocompleteRequest(BaseModel):
     player_id: int
     user_input: str = ""  # Can be empty for suggestion
     llm_provider: Optional[str] = None
+    model: Optional[str] = None
+    thinking: Optional[bool] = None
 
 
 class AutocompleteResponse(BaseModel):
@@ -105,7 +113,11 @@ def game_chat(request: ChatRequest, db: Session = Depends(get_db)):
     session_context = build_session_context(db, request.player_id)
     
     try:
-        gm = create_game_master(llm_provider=request.llm_provider)
+        gm = create_game_master(
+            llm_provider=request.llm_provider,
+            model=request.model,
+            thinking=request.thinking,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     
@@ -163,7 +175,11 @@ def start_game_session(request: StartSessionRequest, db: Session = Depends(get_d
     
     story_manager = get_story_manager()
     try:
-        gm = create_game_master(llm_provider=request.llm_provider)
+        gm = create_game_master(
+            llm_provider=request.llm_provider,
+            model=request.model,
+            thinking=request.thinking,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     
@@ -209,7 +225,9 @@ def handle_autocomplete(request: AutocompleteRequest, db: Session = Depends(get_
             player_id=request.player_id,
             user_input=request.user_input,
             session_context=session_context,
-            llm_provider=request.llm_provider
+            llm_provider=request.llm_provider,
+            model=request.model,
+            thinking=request.thinking,
         )
         return AutocompleteResponse(suggestion=suggestion)
     except ValueError as e:
@@ -377,6 +395,98 @@ def clear_player_story(player_id: int, db: Session = Depends(get_db)):
     }
 
 
+class TTSRequest(BaseModel):
+    text: str
+    player_id: Optional[int] = None
+
+
+def _build_npc_context(player_id: int, db: Session) -> list[dict]:
+    """Look up NPCs at the player's current location + companions.
+
+    Returns a list of dicts for the TTS Director:
+        [{name, gender, voice, npc_id}, ...]
+    """
+    player = db.query(PlayerCharacter).filter(PlayerCharacter.id == player_id).first()
+    if not player:
+        return []
+
+    location_id = None
+    if hasattr(player, "current_location_id"):
+        location_id = player.current_location_id
+
+    # NPCs at the player's location + companions following this player
+    from sqlalchemy import or_
+    filters = []
+    if location_id:
+        filters.append(NonPlayerCharacter.location_id == location_id)
+    filters.append(NonPlayerCharacter.following_player_id == player_id)
+
+    if not filters:
+        return []
+
+    npcs = db.query(NonPlayerCharacter).filter(or_(*filters)).all()
+
+    context = []
+    for npc in npcs:
+        # Infer gender from description/name heuristics or default to "male"
+        gender = "male"
+        desc = (npc.description or "").lower()
+        name_lower = (npc.name or "").lower()
+        female_hints = ("she ", "her ", "woman", "female", "lady", "queen",
+                        "princess", "duchess", "maiden", "girl", "wife",
+                        "barmaid", "waitress", "priestess", "sorceress")
+        if any(h in desc for h in female_hints) or any(h in name_lower for h in female_hints):
+            gender = "female"
+
+        context.append({
+            "name": npc.name,
+            "gender": gender,
+            "voice": npc.voice,
+            "npc_id": npc.id,
+        })
+    return context
+
+
+@router.post("/tts")
+def text_to_speech(request: TTSRequest, db: Session = Depends(get_db)):
+    """Convert Game Master text to speech using Gemini TTS (streaming).
+
+    Returns a stream of length-prefixed WAV chunks.  Each chunk is:
+      4-byte big-endian uint32 (length) + WAV bytes
+
+    The frontend reads chunks and starts playback as soon as the first
+    one arrives, giving low time-to-first-audio.
+
+    When player_id is provided, NPCs at the player's location are used
+    as speaker context.  Auto-assigned voices are persisted to the DB.
+
+    Pipeline per chunk:
+      GM text → TTS Director LLM (once) → micro-batch → Gemini TTS → WAV
+    """
+    if not is_tts_available():
+        raise HTTPException(status_code=503, detail="TTS not available: GEMINI_API_KEY not configured")
+
+    if not request.text.strip():
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    # Build NPC voice context if player_id provided
+    npc_context = None
+    if request.player_id:
+        npc_context = _build_npc_context(request.player_id, db)
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        generate_tts_stream(
+            request.text,
+            npc_context=npc_context,
+            player_id=request.player_id,
+            db=db,
+        ),
+        media_type="application/octet-stream",
+        headers={"X-TTS-Format": "chunked-wav"},
+    )
+
+
 @router.get("/providers")
 def get_llm_providers():
     """Return LLM providers that have an API key configured.
@@ -388,6 +498,7 @@ def get_llm_providers():
     return {
         "default": settings.DEFAULT_LLM_PROVIDER,
         "providers": providers,
+        "tts_available": is_tts_available(),
     }
 
 

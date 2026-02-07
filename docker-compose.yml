@@ -26,11 +26,27 @@ services:
     environment:
       DATABASE_URL: postgresql://rpg_user:rpg_password@db:5432/ai_rpg
       OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OPENAI_MODEL: gpt-5-mini
-      XAI_API_KEY: ${XAI_API_KEY}
-      XAI_BASE_URL: ${XAI_BASE_URL}
-      XAI_MODEL: ${XAI_MODEL}
-      DEFAULT_LLM_PROVIDER: ${DEFAULT_LLM_PROVIDER}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+      XAI_API_KEY: ${XAI_API_KEY:-}
+      XAI_BASE_URL: ${XAI_BASE_URL:-https://api.x.ai/v1}
+      XAI_MODEL: ${XAI_MODEL:-grok-4-1-fast-reasoning}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash-preview-09-2025}
+      CLAUDE_API_KEY: ${CLAUDE_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5-latest}
+      KIMI_API_KEY: ${KIMI_API_KEY:-}
+      KIMI_BASE_URL: ${KIMI_BASE_URL:-https://api.moonshot.cn/v1}
+      KIMI_MODEL: ${KIMI_MODEL:-kimi-k2.5}
+      ZAI_API_KEY: ${ZAI_API_KEY:-}
+      ZAI_BASE_URL: ${ZAI_BASE_URL:-https://open.bigmodel.cn/api/paas/v4/}
+      ZAI_MODEL: ${ZAI_MODEL:-glm-4.7-flash}
+      DEFAULT_LLM_PROVIDER: ${DEFAULT_LLM_PROVIDER:-openai}
+      TTS_MODEL: ${TTS_MODEL:-gemini-2.5-flash-preview-tts}
+      TTS_DIRECTOR_MODEL: ${TTS_DIRECTOR_MODEL:-gemini-2.5-flash-lite}
+      TTS_NARRATOR_VOICE: ${TTS_NARRATOR_VOICE:-Charon}
+      TTS_CHARACTER_VOICE_FEMALE: ${TTS_CHARACTER_VOICE_FEMALE:-Aoede}
+      TTS_CHARACTER_VOICE_MALE: ${TTS_CHARACTER_VOICE_MALE:-Puck}
+      DEBUG_MODE: ${DEBUG_MODE:-false}
       SEED_DATABASE: ${SEED_DATABASE:-true}
     depends_on:
       db:
